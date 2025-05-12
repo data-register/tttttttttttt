@@ -27,201 +27,127 @@ def capture_frame() -> bool:
     """
     try:
         config = get_capture_config()
-
-        # ВАЖНО: Маскираме паролата в логовете, но запазваме оригиналния URL
-        log_url = config.rtsp_url
-        if "@" in log_url:
-            # Заместваме паролата със звездички
-            parts = log_url.split("@")
-            auth_part = parts[0].split("//")
-            if len(auth_part) > 1 and ":" in auth_part[1]:
-                user_pass = auth_part[1].split(":")
-                masked_url = f"{auth_part[0]}//{user_pass[0]}:****@{parts[1]}"
-                logger.info(f"Опит за свързване с RTSP поток: {masked_url}")
-            else:
-                logger.info(f"Опит за свързване с RTSP поток: {log_url}")
-        else:
-            logger.info(f"Опит за свързване с RTSP поток: {log_url}")
-
-        # Проверяваме дали URL-ът е HTTP/HTTPS (за публични видеа) или RTSP
-        is_http_url = config.rtsp_url.startswith('http')
-
+        
+        # Създаваме директориите, ако не съществуват
+        os.makedirs(config.save_dir, exist_ok=True)
+        os.makedirs("static", exist_ok=True)
+        
+        # Генерираме имена на файлове
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = os.path.join(config.save_dir, f"frame_{timestamp}.jpg")
+        latest_path = "static/latest.jpg"
+        
+        # Максимално опростен метод за отваряне на RTSP потока
         try:
-            if is_http_url:
-                logger.info("Използваме HTTP видео източник...")
-                cap = cv2.VideoCapture(config.rtsp_url)
-            else:
-                # За RTSP опитваме с FFMPEG бекенд
-                logger.info("Опит да се използва FFMPEG бекенд за RTSP...")
-                cap = cv2.VideoCapture(config.rtsp_url, cv2.CAP_FFMPEG)
-        except Exception as e:
-            logger.warning(f"Грешка при отваряне на видео потока: {str(e)}")
-            logger.info("Опит да се използва стандартен бекенд...")
+            # В прост режим използваме стандартния начин
             cap = cv2.VideoCapture(config.rtsp_url)
-
-        # Проверяваме дали потокът е отворен
-        if not cap.isOpened():
-            logger.error("Не може да се отвори RTSP потока")
-
-            # Ако не може да се отвори потока, пробваме да създадем плейсхолдър изображение
-            logger.info("Създаване на placeholder изображение...")
-            try:
-                # Проверяваме дали е HTTP URL
-                if config.rtsp_url.startswith('http'):
-                    # За HTTP URLs, пробваме с различен подход
-                    try:
-                        import requests
-                        from PIL import Image
-                        from io import BytesIO
-
-                        logger.info(f"Опит за изтегляне на изображение от HTTP източник: {config.rtsp_url}")
-                        response = requests.get(config.rtsp_url, stream=True, timeout=5)
-                        img = Image.open(BytesIO(response.content))
-                        img_np = np.array(img.convert('RGB'))
-                        frame = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-                        logger.info(f"Успешно изтеглено изображение от HTTP източник с размер: {img_np.shape}")
-                        has_frame = True
-                        return True  # Успешно сме намерили изображение
-                    except Exception as e:
-                        logger.error(f"Грешка при изтегляне на HTTP изображение: {str(e)}")
-
-                # Ако не сме успели дотук, създаваме placeholder
-                update_capture_config(status="error")
-                logger.error("Не може да се отвори видео потока - създаваме placeholder изображение.")
-                return False
-            except Exception as e:
-                logger.error(f"Грешка при опит за създаване на placeholder: {str(e)}")
-                update_capture_config(status="error")
-                return False
-
-        logger.info("RTSP потокът е отворен успешно!")
-
-        # Минимални настройки за по-добра работа
-        try:
-            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        except Exception as e:
-            logger.warning(f"Не може да се зададе размер на буфера: {str(e)}")
-
-        # Диагностика на потока
-        try:
-            width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-            height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            logger.info(f"Поточни параметри: {width}x{height} @ {fps}fps")
-        except Exception as e:
-            logger.warning(f"Грешка при четене на параметрите на потока: {str(e)}")
-
-        # Четем кадъра с 5-секунден таймаут
-        has_frame = False
-        start_time = time.time()
-        frame = None
-
-        # Опитваме да прочетем кадър с повече опити
-        max_attempts = 10  # Увеличаваме броя на опитите
-        attempt = 0
-        while not has_frame and time.time() - start_time < 5 and attempt < max_attempts:
-            try:
-                ret, frame = cap.read()
-                if ret and frame is not None:
-                    has_frame = True
-                    logger.info(f"Успешно прочетен кадър от опит {attempt+1}")
-                    break
-            except Exception as e:
-                logger.warning(f"Грешка при четене на кадър (опит {attempt+1}): {str(e)}")
-
-            time.sleep(0.1)
-            attempt += 1
-
-        # Освобождаваме ресурсите незабавно
-        try:
+            
+            # Проверучваме дали сме отворили потока
+            if not cap.isOpened():
+                # Един опит с FFMPEG бекенда
+                cap = cv2.VideoCapture(config.rtsp_url, cv2.CAP_FFMPEG)
+                if not cap.isOpened():
+                    # Ако и това не работи, създаваме празно изображение
+                    height = config.height if config.height > 0 else 480
+                    width = config.width if config.width > 0 else 640
+                    frame = np.zeros((height, width, 3), dtype=np.uint8)
+                    cv2.putText(
+                        frame,
+                        "No camera connection",
+                        (50, height // 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 
+                        1, 
+                        (255, 255, 255), 
+                        2
+                    )
+                    
+                    # Записваме празното изображение
+                    encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
+                    cv2.imwrite(latest_path, frame, encode_params)
+                    update_capture_config(status="error")
+                    return False
+            
+            # Прочитаме един кадър
+            ret, frame = cap.read()
+            
+            # Освобождаваме камерата
             cap.release()
+            
+            # Проверка дали имаме успешен кадър
+            if not ret or frame is None:
+                # При грешка създаваме празно изображение
+                height = config.height if config.height > 0 else 480
+                width = config.width if config.width > 0 else 640
+                frame = np.zeros((height, width, 3), dtype=np.uint8)
+                cv2.putText(
+                    frame,
+                    "No frame available",
+                    (50, height // 2),
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    1, 
+                    (255, 255, 255), 
+                    2
+                )
+                
+                # Записваме празното изображение
+                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
+                cv2.imwrite(latest_path, frame, encode_params)
+                update_capture_config(status="error")
+                return False
+                
+            # Преоразмеряваме кадъра ако е нужно
+            if config.width > 0 and config.height > 0:
+                frame = cv2.resize(frame, (config.width, config.height))
+                
+            # Записваме кадъра
+            encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
+            
+            # Първо в static директорията (най-важно)
+            cv2.imwrite(latest_path, frame, encode_params)
+            
+            # После във фрейм директорията
+            try:
+                cv2.imwrite(filepath, frame, encode_params)
+            except Exception as e:
+                logger.warning(f"Не може да се запише в {filepath}, но latest.jpg е записан: {str(e)}")
+                # Продължаваме, тъй като най-важното е latest.jpg
+            
+            # Обновяваме конфигурацията
+            update_capture_config(
+                status="ok",
+                last_frame_time=datetime.now(),
+                last_frame_path=filepath
+            )
+            
+            return True
+            
         except Exception as e:
-            logger.warning(f"Грешка при освобождаване на ресурсите: {str(e)}")
-
-        # Проверяваме дали сме получили кадър
-        if not has_frame or frame is None:
-            logger.error("Не може да се прочете кадър от потока след {max_attempts} опита (таймаут)")
-            update_capture_config(status="error")
-
-            # Последен опит - връщаме placeholder изображение вместо грешка
+            logger.error(f"Грешка при заснемане на кадър: {str(e)}")
+            
+            # Създаваме празно изображение при грешка
             try:
                 height = config.height if config.height > 0 else 480
                 width = config.width if config.width > 0 else 640
                 frame = np.zeros((height, width, 3), dtype=np.uint8)
                 cv2.putText(
                     frame,
-                    "Error: Could not read from camera",
+                    f"Error: {str(e)[:30]}",
                     (50, height // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
-                    (255, 255, 255),
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    0.7, 
+                    (255, 255, 255), 
                     2
                 )
-                logger.info("Създадено placeholder изображение при грешка")
-            except Exception as e:
-                logger.error(f"Не може да се създаде placeholder изображение: {str(e)}")
-                return False
-        else:
-            logger.info(f"Получен валиден кадър с размери: {frame.shape}")
-            update_capture_config(status="ok")  # Обновяваме статуса при успех
-        
-        # Преоразмеряваме кадъра, ако е нужно
-        if config.width > 0 and config.height > 0:
-            frame = cv2.resize(frame, (config.width, config.height))
-        
-        # Създаваме директориите ако не съществуват
-        os.makedirs(config.save_dir, exist_ok=True)
-        os.makedirs("static", exist_ok=True)
-        
-        # Генерираме име на файла
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filepath = os.path.join(config.save_dir, f"frame_{timestamp}.jpg")
-        latest_path = "static/latest.jpg"
-        
-        # Запазваме изображението
-        encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
-
-        try:
-            # Записваме в статичната директория първо, това е най-важно
-            cv2.imwrite(latest_path, frame, encode_params)
-            logger.info(f"Успешно запазен кадър в: {latest_path}")
-
-            # След това записваме основния файл
-            try:
-                cv2.imwrite(filepath, frame, encode_params)
-                logger.info(f"Успешно запазен кадър в: {filepath}")
-            except Exception as e:
-                logger.warning(f"Не може да се запази кадър в {filepath}: {str(e)}")
-                # Продължаваме изпълнението, тъй като успешно записахме в static
-        except PermissionError as pe:
-            logger.error(f"Грешка с права за достъп: {str(pe)}")
-            # Опитваме да запишем във временна директория
-            try:
-                alt_path = os.path.join("/tmp", f"frame_{timestamp}.jpg")
-                cv2.imwrite(alt_path, frame, encode_params)
-                # Опитваме да копираме файла към static
-                import shutil
-                shutil.copy(alt_path, latest_path)
-                logger.info(f"Запазен кадър в алтернативна локация и копиран в {latest_path}")
-            except Exception as e2:
-                logger.error(f"Не може да се запише във временна директория: {str(e2)}")
-                return False
-        except Exception as e:
-            logger.error(f"Грешка при запис на файлове: {str(e)}")
-            logger.error(f"Stack trace: {traceback.format_exc()}")
+                
+                # Записваме празното изображение
+                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
+                cv2.imwrite(latest_path, frame, encode_params)
+            except Exception as inner_err:
+                logger.error(f"Не може да се създаде дори празно изображение: {str(inner_err)}")
+                
+            update_capture_config(status="error")
             return False
-        
-        logger.info(f"Успешно запазен кадър в: {filepath}")
-        
-        # Обновяваме конфигурацията
-        update_capture_config(
-            status="ok",
-            last_frame_time=datetime.now(),
-            last_frame_path=filepath
-        )
-        
-        return True
-        
+            
     except Exception as e:
         logger.error(f"Грешка при заснемане на кадър: {str(e)}")
         import traceback
