@@ -35,12 +35,10 @@ class PTZConfig(BaseModel):
     ptz_enabled: bool = True  # дали PTZ камерата е включена
 
 # Глобална конфигурация на модула
-# В Hugging Face Space трябва да използваме публични тестови URL-и
 _config = PTZConfig(
-    # Демо камера за тест в HF Space
-    onvif_url=os.getenv("ONVIF_URL", "rtsp://demo:demo@ipvmdemo.dyndns.org:5541/onvif-media/media.amp"),
-    username=os.getenv("ONVIF_USERNAME", "demo"),
-    password=os.getenv("ONVIF_PASSWORD", "demo"),
+    onvif_url=os.getenv("ONVIF_URL", "rtsp://109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"),
+    username=os.getenv("ONVIF_USERNAME", "admin"),
+    password=os.getenv("ONVIF_PASSWORD", "L20E0658"),
     current_preset=int(os.getenv("CURRENT_PRESET", "0")),
     dwell_time=int(os.getenv("DWELL_TIME", "30")),
     home_dwell_time=int(os.getenv("HOME_DWELL_TIME", "600")),
