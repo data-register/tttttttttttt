@@ -43,12 +43,19 @@ def capture_frame() -> bool:
         else:
             logger.info(f"Опит за свързване с RTSP поток: {log_url}")
 
-        # Опитваме да използваме FFMPEG бекенда, но с фолбек към други бекенди
+        # Проверяваме дали URL-ът е HTTP/HTTPS (за публични видеа) или RTSP
+        is_http_url = config.rtsp_url.startswith('http')
+
         try:
-            logger.info("Опит да се използва FFMPEG бекенд...")
-            cap = cv2.VideoCapture(config.rtsp_url, cv2.CAP_FFMPEG)
+            if is_http_url:
+                logger.info("Използваме HTTP видео източник...")
+                cap = cv2.VideoCapture(config.rtsp_url)
+            else:
+                # За RTSP опитваме с FFMPEG бекенд
+                logger.info("Опит да се използва FFMPEG бекенд за RTSP...")
+                cap = cv2.VideoCapture(config.rtsp_url, cv2.CAP_FFMPEG)
         except Exception as e:
-            logger.warning(f"Грешка при използване на FFMPEG бекенда: {str(e)}")
+            logger.warning(f"Грешка при отваряне на видео потока: {str(e)}")
             logger.info("Опит да се използва стандартен бекенд...")
             cap = cv2.VideoCapture(config.rtsp_url)
 
@@ -56,19 +63,34 @@ def capture_frame() -> bool:
         if not cap.isOpened():
             logger.error("Не може да се отвори RTSP потока")
 
-            # Пробваме с други настройки
-            logger.info("Опит за отваряне с алтернативни настройки...")
+            # Ако не може да се отвори потока, пробваме да създадем плейсхолдър изображение
+            logger.info("Създаване на placeholder изображение...")
             try:
-                # Опитваме с точно посочен URL без допълнителни параметри
-                clean_url = config.rtsp_url.split("?")[0] if "?" in config.rtsp_url else config.rtsp_url
-                logger.info(f"Опит с опростен URL: {clean_url}")
-                cap = cv2.VideoCapture(clean_url)
-                if not cap.isOpened():
-                    update_capture_config(status="error")
-                    logger.error("Не може да се отвори RTSP потока и с алтернативни настройки.")
-                    return False
+                # Проверяваме дали е HTTP URL
+                if config.rtsp_url.startswith('http'):
+                    # За HTTP URLs, пробваме с различен подход
+                    try:
+                        import requests
+                        from PIL import Image
+                        from io import BytesIO
+
+                        logger.info(f"Опит за изтегляне на изображение от HTTP източник: {config.rtsp_url}")
+                        response = requests.get(config.rtsp_url, stream=True, timeout=5)
+                        img = Image.open(BytesIO(response.content))
+                        img_np = np.array(img.convert('RGB'))
+                        frame = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+                        logger.info(f"Успешно изтеглено изображение от HTTP източник с размер: {img_np.shape}")
+                        has_frame = True
+                        return True  # Успешно сме намерили изображение
+                    except Exception as e:
+                        logger.error(f"Грешка при изтегляне на HTTP изображение: {str(e)}")
+
+                # Ако не сме успели дотук, създаваме placeholder
+                update_capture_config(status="error")
+                logger.error("Не може да се отвори видео потока - създаваме placeholder изображение.")
+                return False
             except Exception as e:
-                logger.error(f"Грешка при опит с алтернативни настройки: {str(e)}")
+                logger.error(f"Грешка при опит за създаване на placeholder: {str(e)}")
                 update_capture_config(status="error")
                 return False
 

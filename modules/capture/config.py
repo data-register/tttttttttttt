@@ -20,9 +20,11 @@ class CaptureConfig(BaseModel):
     running: bool = True
 
 # Глобална конфигурация на модула
-# Използваме същия RTSP URL като в ONVIF модула, ако не е зададен друг
+# В Hugging Face Space не можем да използваме реални RTSP потоци, затова използваме публичен тестов URL
+# За локална работа можете да зададете RTSP_URL като environment променлива
 _config = CaptureConfig(
-    rtsp_url=os.getenv("RTSP_URL", os.getenv("ONVIF_URL", "rtsp://admin:L20E0658@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif")),
+    # Демо видео вместо реален RTSP поток
+    rtsp_url=os.getenv("RTSP_URL", os.getenv("ONVIF_URL", "https://sample-videos.com/video123/mp4/720/big_buck_bunny_720p_1mb.mp4")),
     save_dir=os.getenv("SAVE_DIR", "frames"),
     interval=int(os.getenv("INTERVAL", "10")),
     width=int(os.getenv("WIDTH", "1280")),
