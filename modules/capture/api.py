@@ -26,17 +26,38 @@ templates = Jinja2Templates(directory=templates_dir)
 async def latest_jpg():
     """Връща последния запазен JPEG файл"""
     try:
+        # Първо проверяваме в static директорията
+        static_path = "static/latest.jpg"
+        if os.path.exists(static_path):
+            return FileResponse(static_path, media_type="image/jpeg")
+
+        # Ако не е в static, проверяваме в директорията за кадри
         config = get_capture_config()
-        latest_path = os.path.join(config.save_dir, "latest.jpg")
-        
-        if not os.path.exists(latest_path):
-            # Връщаме placeholder изображение
-            return Response(content=get_placeholder_image(), media_type="image/jpeg")
-        
-        return FileResponse(latest_path, media_type="image/jpeg")
+        frames_path = os.path.join(config.save_dir, "latest.jpg")
+        if os.path.exists(frames_path):
+            return FileResponse(frames_path, media_type="image/jpeg")
+
+        # Ако имаме последен известен кадър, опитваме с него
+        if config.last_frame_path and os.path.exists(config.last_frame_path):
+            # Копираме кадъра в static директорията за бъдещи запитвания
+            try:
+                import shutil
+                shutil.copy(config.last_frame_path, static_path)
+                logger.info(f"Копиран последен кадър от {config.last_frame_path} към {static_path}")
+                return FileResponse(static_path, media_type="image/jpeg")
+            except Exception as e:
+                logger.warning(f"Грешка при копиране на кадър: {str(e)}")
+                return FileResponse(config.last_frame_path, media_type="image/jpeg")
+
+        # Връщаме placeholder изображение
+        return Response(content=get_placeholder_image(), media_type="image/jpeg")
     except Exception as e:
         logger.error(f"Грешка при достъпване на последния кадър: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        # Опитваме да върнем placeholder вместо грешка
+        try:
+            return Response(content=get_placeholder_image(), media_type="image/jpeg")
+        except:
+            raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/info")
 async def capture_info():

@@ -9,7 +9,7 @@ import time
 import uvicorn
 from datetime import datetime
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -191,7 +191,15 @@ async def health():
 # Маршрут за пренасочване към последната снимка
 @app.get("/latest.jpg")
 async def latest_image_redirect():
-    return RedirectResponse(url="/capture/latest.jpg")
+    try:
+        # Проверяваме дали файлът съществува в static директорията
+        if os.path.exists("static/latest.jpg"):
+            return FileResponse("static/latest.jpg", media_type="image/jpeg")
+        # Ако не съществува, пренасочваме към capture модула
+        return RedirectResponse(url="/capture/latest.jpg")
+    except Exception as e:
+        logger.error(f"Грешка при опит за достъп до latest.jpg: {str(e)}")
+        return RedirectResponse(url="/capture/latest.jpg")
 
 # Модулите за работа с дата и време са преместени в началото на файла
 

@@ -20,8 +20,9 @@ class CaptureConfig(BaseModel):
     running: bool = True
 
 # Глобална конфигурация на модула
+# Използваме същия RTSP URL като в ONVIF модула, ако не е зададен друг
 _config = CaptureConfig(
-    rtsp_url=os.getenv("RTSP_URL", "rtsp://admin:L20E0658@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"),
+    rtsp_url=os.getenv("RTSP_URL", os.getenv("ONVIF_URL", "rtsp://admin:L20E0658@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif")),
     save_dir=os.getenv("SAVE_DIR", "frames"),
     interval=int(os.getenv("INTERVAL", "10")),
     width=int(os.getenv("WIDTH", "1280")),
