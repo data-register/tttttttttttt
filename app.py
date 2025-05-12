@@ -9,7 +9,7 @@ import time
 import uvicorn
 from datetime import datetime
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -194,11 +194,36 @@ async def latest_image_redirect():
     try:
         # Проверяваме дали файлът съществува в static директорията
         if os.path.exists("static/latest.jpg"):
+            logger.info(f"Serving latest.jpg from static directory, size: {os.path.getsize('static/latest.jpg')} bytes")
             return FileResponse("static/latest.jpg", media_type="image/jpeg")
-        # Ако не съществува, пренасочваме към capture модула
+
+        # Проверяваме във фреймс директорията
+        frames_dir = "frames"
+        if os.path.exists(os.path.join(frames_dir, "latest.jpg")):
+            frame_path = os.path.join(frames_dir, "latest.jpg")
+            logger.info(f"Serving latest.jpg from frames directory: {frame_path}")
+            return FileResponse(frame_path, media_type="image/jpeg")
+
+        # Опитваме във /tmp директорията
+        if os.path.exists("/tmp/latest.jpg"):
+            logger.info("Serving latest.jpg from /tmp directory")
+            return FileResponse("/tmp/latest.jpg", media_type="image/jpeg")
+
+        # Ако не е намерен никъде, опитваме да го създадем директно
+        try:
+            from modules.capture.capture import get_placeholder_image
+            logger.info("Generating placeholder image directly")
+            content = get_placeholder_image()
+            return Response(content=content, media_type="image/jpeg")
+        except Exception as placeholder_err:
+            logger.error(f"Cannot generate placeholder: {str(placeholder_err)}")
+
+        # Последна опция - пренасочване към capture модула
+        logger.warning("Redirecting to /capture/latest.jpg as last resort")
         return RedirectResponse(url="/capture/latest.jpg")
     except Exception as e:
         logger.error(f"Грешка при опит за достъп до latest.jpg: {str(e)}")
+        # Последен опит - пренасочване
         return RedirectResponse(url="/capture/latest.jpg")
 
 # Модулите за работа с дата и време са преместени в началото на файла

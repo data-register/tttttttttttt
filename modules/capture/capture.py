@@ -341,56 +341,108 @@ def initialize():
     # Проверка на OpenCV инсталацията
     verify_opencv_installation()
 
-    # Създаваме директориите ако не съществуват
+    # Получаваме конфигурацията
     config = get_capture_config()
+    logger.info(f"RTSP URL: {config.rtsp_url}")
 
-    # Създаваме всички необходими директории с правилните права
-    try:
-        # Основна директория за запазване на кадри
-        os.makedirs(config.save_dir, exist_ok=True)
-        os.chmod(config.save_dir, 0o777)
-        logger.info(f"Създадена директория {config.save_dir} с права 777")
+    # Определяме дали сме в Hugging Face Space
+    is_hf_space = os.environ.get('SPACE_ID') is not None
+    logger.info(f"Hugging Face Space: {is_hf_space}")
 
-        # Статична директория за web достъп
-        os.makedirs("static", exist_ok=True)
-        os.chmod("static", 0o777)
-        logger.info("Създадена директория static с права 777")
+    # Директории за създаване
+    directories = [
+        config.save_dir,
+        "static",
+        "/tmp",
+        "/tmp/frames"
+    ]
 
-        # Временна директория за случаи на проблеми с права
-        os.makedirs("/tmp/frames", exist_ok=True)
-        os.chmod("/tmp/frames", 0o777)
-        logger.info("Създадена директория /tmp/frames с права 777")
-    except Exception as e:
-        logger.error(f"Грешка при създаване на директории: {str(e)}")
-
-    # Създаваме placeholder за latest.jpg ако не съществува
-    if not os.path.exists("static/latest.jpg"):
-        height = config.height if config.height > 0 else 480
-        width = config.width if config.width > 0 else 640
-        placeholder = np.zeros((height, width, 3), dtype=np.uint8)
-        cv2.putText(
-            placeholder,
-            "Waiting for first frame...",
-            (50, height // 2),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (255, 255, 255),
-            2
-        )
+    # Създаваме всички необходими директории
+    for directory in directories:
         try:
-            cv2.imwrite("static/latest.jpg", placeholder)
-            logger.info("Създаден placeholder за latest.jpg")
-        except Exception as e:
-            logger.error(f"Грешка при запис на placeholder: {str(e)}")
+            os.makedirs(directory, exist_ok=True)
             try:
-                # Опитваме във временната директория и после го копираме
-                temp_path = "/tmp/placeholder.jpg"
-                cv2.imwrite(temp_path, placeholder)
-                import shutil
-                shutil.copy(temp_path, "static/latest.jpg")
-                logger.info("Създаден placeholder във временна директория и копиран в static")
-            except Exception as e2:
-                logger.error(f"Не може да се създаде placeholder и във временна директория: {str(e2)}")
+                os.chmod(directory, 0o777)
+                logger.info(f"Създадена директория {directory} с права 777")
+            except Exception as chmod_err:
+                logger.warning(f"Не могат да се зададат права за {directory}: {str(chmod_err)}")
+        except Exception as mkdir_err:
+            logger.error(f"Грешка при създаване на {directory}: {str(mkdir_err)}")
+
+    # Проверка за достъп до директориите
+    for directory in directories:
+        try:
+            test_file = os.path.join(directory, "test_write.txt")
+            with open(test_file, "w") as f:
+                f.write("Test write access")
+            os.remove(test_file)
+            logger.info(f"Имаме права за запис в {directory}")
+        except Exception as write_err:
+            logger.warning(f"Нямаме права за запис в {directory}: {str(write_err)}")
+
+    # Създаваме задължително placeholder за latest.jpg
+    height = config.height if config.height > 0 else 480
+    width = config.width if config.width > 0 else 640
+    placeholder = np.zeros((height, width, 3), dtype=np.uint8)
+
+    # Добавяме информация за средата
+    env_info = f"HF Space: {is_hf_space}" if is_hf_space else "Local environment"
+
+    cv2.putText(
+        placeholder,
+        "Camera initialization... ",
+        (50, height // 2 - 20),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        1,
+        (255, 255, 255),
+        2
+    )
+
+    cv2.putText(
+        placeholder,
+        env_info,
+        (50, height // 2 + 20),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (200, 200, 255),
+        2
+    )
+
+    # Опитваме да запишем в различни места
+    possible_paths = [
+        "static/latest.jpg",
+        os.path.join(config.save_dir, "latest.jpg"),
+        "/tmp/latest.jpg"
+    ]
+
+    success = False
+    for path in possible_paths:
+        try:
+            cv2.imwrite(path, placeholder)
+            logger.info(f"Успешно записан placeholder в {path}")
+            success = True
+
+            # Копираме в static директорията, ако не е там
+            if path != "static/latest.jpg":
+                try:
+                    import shutil
+                    shutil.copy(path, "static/latest.jpg")
+                    logger.info(f"Копирано от {path} в static/latest.jpg")
+                except Exception as copy_err:
+                    logger.error(f"Грешка при копиране в static: {str(copy_err)}")
+            break
+        except Exception as write_err:
+            logger.warning(f"Не може да се запише в {path}: {str(write_err)}")
+
+    if not success:
+        logger.error("Не може да се запише placeholder в нито една директория!")
+
+    # Проверяваме дали файлът е създаден в static
+    logger.info(f"Placeholder file exists: {os.path.exists('static/latest.jpg')}")
+    if os.path.exists('static/latest.jpg'):
+        file_size = os.path.getsize('static/latest.jpg')
+        logger.info(f"Placeholder file size: {file_size} bytes")
+
 
     # Отлагаме тестовото първоначално извличане на кадър с няколко секунди
     # за да дадем време на системата да се стабилизира
