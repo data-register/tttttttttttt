@@ -8,15 +8,17 @@ jobs:
   sync-to-hub:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
         with:
-          fetch-depth: 0
           lfs: true
-      - name: Push to Hugging Face
+          fetch-depth: 0
+
+      - name: Push to Hugging Face Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git config --global user.email "rosenobzor@gmail.com"
           git config --global user.name "rosenobzor"
-          git remote add huggingface https://rosenobzor:$HF_TOKEN@huggingface.co/spaces/warp360/claude-code-space
+          git remote add huggingface https://rosenobzor:$HF_TOKEN@huggingface.co/spaces/warp360/9
           git push --force huggingface main
