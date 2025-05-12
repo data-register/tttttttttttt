@@ -17,6 +17,6 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           git config --global user.email "rosenobzor@gmail.com"
-          git config --global user.name "data-register"
-          git remote add huggingface https://huggingface.co/spaces/warp360/9
+          git config --global user.name "rosenobzor"
+          git remote add huggingface https://rosenobzor:$HF_TOKEN@huggingface.co/spaces/warp360/claude-code-space
           git push --force huggingface main
