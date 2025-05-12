@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PTZ Control - Camera System</title>
+    <meta http-equiv="refresh" content="300">
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            max-width: 800px; 
+            margin: 0 auto; 
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 { color: #0066cc; text-align: center; }
+        .container { 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .ptz-section { 
+            margin: 20px 0; 
+            border: 1px solid #ccc; 
+            padding: 20px;
+            border-radius: 5px;
+            background-color: #f9f9f9;
+            width: 100%;
+        }
+        .info { 
+            background-color: #e7f2ff; 
+            padding: 15px; 
+            border-radius: 5px; 
+            margin-top: 20px;
+            width: 100%;
+        }
+        .img-container {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        .status {
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        .status-ok { background-color: #d4edda; color: #155724; }
+        .status-error { background-color: #f8d7da; color: #721c24; }
+        .status-warning { background-color: #fff3cd; color: #856404; }
+        
+        .presets-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .preset-button {
+            display: block;
+            text-align: center;
+            background-color: #0066cc;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            text-decoration: none;
+            transition: background-color 0.3s;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+        }
+        .preset-button:hover {
+            background-color: #0055aa;
+        }
+        .preset-button.active {
+            background-color: #28a745;
+        }
+        
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        .btn {
+            padding: 10px 15px;
+            border-radius: 4px;
+            border: none;
+            color: white;
+            font-weight: bold;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            text-align: center;
+        }
+        .btn-primary {
+            background-color: #0066cc;
+        }
+        .btn-primary:hover {
+            background-color: #0055aa;
+        }
+        .btn-success {
+            background-color: #28a745;
+        }
+        .btn-success:hover {
+            background-color: #218838;
+        }
+        .btn-danger {
+            background-color: #dc3545;
+        }
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"],
+        input[type="number"],
+        input[type="password"],
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .back-link {
+            display: block;
+            margin-top: 20px;
+            text-align: center;
+            color: #0066cc;
+        }
+    </style>
+</head>
+<body>
+    <h1>PTZ Camera Control</h1>
+    <div class="container">
+        <div class="ptz-section">
+            <h2>Текущ кадър</h2>
+            
+            <div class="img-container">
+                <img src="/latest.jpg?ts={{ timestamp }}" alt="Текущ кадър от камерата">
+            </div>
+            
+            <h2>Пресети</h2>
+            <div class="presets-grid">
+                {% for preset in presets %}
+                <button onclick="gotoPreset({{ preset.index }})" class="preset-button {% if config.current_preset == preset.index %}active{% endif %}">
+                    {{ preset.name if preset.name else 'Preset ' + preset.index|string }}
+                </button>
+                {% endfor %}
+            </div>
+            
+            <h2>Автоматичен режим</h2>
+            <div class="controls">
+                <a href="/ptz/automatic/on" class="btn btn-success">Включи автоматичен режим</a>
+                <a href="/ptz/automatic/off" class="btn btn-danger">Изключи автоматичен режим</a>
+            </div>
+            
+            <h2>Управление на циклите</h2>
+            <div class="controls">
+                <a href="/ptz/start" class="btn btn-primary">Стартирай цикъла</a>
+                <a href="/ptz/stop" class="btn btn-danger">Спри цикъла</a>
+                <a href="/capture/capture_now" class="btn btn-primary">Направи снимка сега</a>
+            </div>
+        </div>
+        
+        <div class="info">
+            <p><strong>Статус:</strong> 
+                <span class="status {% if status == 'ok' %}status-ok{% elif status == 'error' %}status-error{% else %}status-warning{% endif %}">
+                    {{ status_text }}
+                </span>
+            </p>
+            <p><strong>Автоматичен режим:</strong> {{ 'Включен' if automatic_mode else 'Изключен' }}</p>
+            <p><strong>Текущ пресет:</strong> {{ config.current_preset }}</p>
+            <p><strong>Последно движение:</strong> {{ last_move }}</p>
+            <p><strong>Време за изчакване в начална позиция:</strong> {{ config.home_dwell_time }} секунди</p>
+            <p><strong>Време за изчакване в другите позиции:</strong> {{ config.dwell_time }} секунди</p>
+            <p><strong>Закъснение преди снимка:</strong> {{ config.capture_delay }} секунди</p>
+        </div>
+        
+        <div class="ptz-section">
+            <h2>Настройки</h2>
+            <form id="configForm" onsubmit="return updateConfig(event)">
+                <div class="form-group">
+                    <label for="home_preset">Начален пресет:</label>
+                    <input type="number" id="home_preset" name="home_preset" value="{{ config.home_preset }}" min="0" max="4">
+                </div>
+                
+                <div class="form-group">
+                    <label for="dwell_time">Време за изчакване в пресетите (секунди):</label>
+                    <input type="number" id="dwell_time" name="dwell_time" value="{{ config.dwell_time }}" min="5" max="300">
+                </div>
+                
+                <div class="form-group">
+                    <label for="home_dwell_time">Време за изчакване в начална позиция (секунди):</label>
+                    <input type="number" id="home_dwell_time" name="home_dwell_time" value="{{ config.home_dwell_time }}" min="10" max="3600">
+                </div>
+                
+                <div class="form-group">
+                    <label for="capture_delay">Закъснение преди снимка (секунди):</label>
+                    <input type="number" id="capture_delay" name="capture_delay" value="{{ config.capture_delay }}" min="1" max="60">
+                </div>
+                
+                <div class="form-group">
+                    <label for="onvif_url">ONVIF URL:</label>
+                    <input type="text" id="onvif_url" name="onvif_url" value="{{ config.onvif_url }}">
+                </div>
+                
+                <div class="form-group">
+                    <label for="username">ONVIF Потребителско име:</label>
+                    <input type="text" id="username" name="username" value="{{ config.username }}">
+                </div>
+                
+                <div class="form-group">
+                    <label for="password">ONVIF Парола:</label>
+                    <input type="password" id="password" name="password" placeholder="Въведете нова парола">
+                </div>
+                
+                <button type="submit" class="btn btn-primary">Запази настройките</button>
+            </form>
+        </div>
+        
+        <a href="/" class="back-link">Назад към началната страница</a>
+    </div>
+
+    <script>
+        // Функция за преминаване към пресет
+        function gotoPreset(presetNumber) {
+            fetch(`/ptz/goto/${presetNumber}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'ok') {
+                        // Обновяваме активния клас на бутоните
+                        const buttons = document.querySelectorAll('.preset-button');
+                        buttons.forEach(button => button.classList.remove('active'));
+                        buttons[presetNumber].classList.add('active');
+                        
+                        // Изчакваме малко и обновяваме изображението
+                        setTimeout(() => {
+                            const img = document.querySelector('.img-container img');
+                            if (img) {
+                                img.src = '/latest.jpg?ts=' + Date.now();
+                            }
+                        }, 3000);
+                    } else {
+                        alert('Грешка: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Грешка при преминаване към пресет');
+                });
+        }
+        
+        // Функция за обновяване на конфигурацията
+        function updateConfig(event) {
+            event.preventDefault();
+            
+            const formData = new FormData(document.getElementById('configForm'));
+            
+            fetch('/ptz/config', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'ok') {
+                    alert('Настройките са запазени успешно!');
+                    // Презареждаме страницата, за да видим промените
+                    window.location.reload();
+                } else {
+                    alert('Грешка: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Грешка при запазване на настройките');
+            });
+            
+            return false;
+        }
+        
+        // Автоматично обновяване на изображението всеки 10 секунди
+        setInterval(function() {
+            const img = document.querySelector('.img-container img');
+            if (img) {
+                img.src = '/latest.jpg?ts=' + Date.now();
+            }
+        }, 10000);
+    </script>
+</body>
+</html>
