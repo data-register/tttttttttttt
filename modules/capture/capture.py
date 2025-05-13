@@ -274,43 +274,74 @@ def capture_frame_ffmpeg() -> bool:
         return False
 
 # Проверка за наличие на FFmpeg и избор на подходящ метод
-def generate_screenshot() -> bool:
-    """Създава скрийншот с дата и час"""
+def capture_frame() -> bool:
+    """Извлича един кадър от RTSP потока и го записва като JPEG файл"""
     config = get_capture_config()
     
     try:
-        # Създаваме директориите ако не съществуват
+        # Добавяме автентикация в URL
+        rtsp_user = os.getenv("RTSP_USER", "admin")
+        rtsp_pass = os.getenv("RTSP_PASS", "L20E0658")
+        rtsp_url = f"rtsp://{rtsp_user}:{rtsp_pass}@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"
+        
+        # Маскираме паролата в лога
+        log_url = rtsp_url.replace(rtsp_pass, "*****")
+        logger.info(f"Опит за свързване с RTSP поток: {log_url}")
+        
+        # Създаваме директориите за снимки
         os.makedirs(config.save_dir, exist_ok=True)
         os.makedirs("static", exist_ok=True)
         
-        # Създаване на изображение с текущата дата и час
-        height = config.height if config.height > 0 else 720
-        width = config.width if config.width > 0 else 1280
-        image = np.zeros((height, width, 3), dtype=np.uint8)
+        # Създаваме VideoCapture обект директно с FFMPEG backend
+        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
         
-        # Добавяне на текущата дата и час
-        current_time = datetime.now()
-        timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+        # Проверка дали потокът е отворен
+        if not cap.isOpened():
+            logger.error(f"Не може да се отвори RTSP потока: {log_url}")
+            update_capture_config(status="error")
+            return False
         
-        # Добавяне на текст в изображението
-        cv2.putText(image, "RTSP Camera", (width//2-150, height//2-100), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3)
-        cv2.putText(image, timestamp_str, (width//2-200, height//2+50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (200, 200, 255), 2)
-        cv2.putText(image, "Camera: 109.160.23.42", (width//2-200, height//2+150), cv2.FONT_HERSHEY_SIMPLEX, 1, (200, 255, 200), 2)
+        logger.info("RTSP потокът е отворен успешно")
         
-        # Очертаване на рамка
-        cv2.rectangle(image, (50, 50), (width-50, height-50), (0, 0, 255), 5)
+        # Настройка за по-добра работа
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
+        # Четем кадъра със кратък таймаут
+        has_frame = False
+        start_time = time.time()
+        frame = None
+        
+        while not has_frame and time.time() - start_time < 5:
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                has_frame = True
+                break
+            time.sleep(0.1)
+        
+        # Освобождаваме ресурсите
+        cap.release()
+        
+        if not has_frame or frame is None:
+            logger.error("Не може да се прочете кадър от RTSP потока")
+            update_capture_config(status="error")
+            return False
+        
+        # Преоразмеряваме кадъра, ако е нужно
+        if config.width > 0 and config.height > 0:
+            frame = cv2.resize(frame, (config.width, config.height))
         
         # Генерираме име на файла с текущата дата и час
-        filename = f"frame_{current_time.strftime('%Y%m%d_%H%M%S')}.jpg"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"frame_{timestamp}.jpg"
         filepath = os.path.join(config.save_dir, filename)
         
-        # Записваме изображението във всички нужни локации
+        # Записваме кадъра във всички нужни локации
         encode_params = [cv2.IMWRITE_JPEG_QUALITY, config.quality]
         success_paths = []
         
         # 1. Архивно копие с timestamp
         try:
-            cv2.imwrite(filepath, image, encode_params)
+            cv2.imwrite(filepath, frame, encode_params)
             success_paths.append(filepath)
         except Exception as e:
             logger.warning(f"Не може да се запише в {filepath}: {str(e)}")
@@ -318,7 +349,7 @@ def generate_screenshot() -> bool:
         # 2. latest.jpg в основната директория
         latest_path = os.path.join(config.save_dir, "latest.jpg")
         try:
-            cv2.imwrite(latest_path, image, encode_params)
+            cv2.imwrite(latest_path, frame, encode_params)
             success_paths.append(latest_path)
         except Exception as e:
             logger.warning(f"Не може да се запише в {latest_path}: {str(e)}")
@@ -326,37 +357,35 @@ def generate_screenshot() -> bool:
         # 3. static/latest.jpg за web достъп
         static_path = "static/latest.jpg"
         try:
-            cv2.imwrite(static_path, image, encode_params)
+            cv2.imwrite(static_path, frame, encode_params)
             success_paths.append(static_path)
         except Exception as e:
             logger.warning(f"Не може да се запише в {static_path}: {str(e)}")
         
         # Проверка дали поне един запис е успешен
         if not success_paths:
-            logger.error("Не може да се запише изображението в нито една локация")
+            logger.error("Не може да се запише кадърът в нито една локация")
             update_capture_config(status="error")
             return False
         
         # Обновяваме конфигурацията
         update_capture_config(
             last_frame_path=filepath,
-            last_frame_time=current_time,
+            last_frame_time=datetime.now(),
             status="ok"
         )
         
-        logger.info(f"Успешно запазен скрийншот в: {', '.join(success_paths)}")
+        logger.info(f"Успешно запазен кадър в: {', '.join(success_paths)}")
         return True
     except Exception as e:
-        logger.error(f"Грешка при генериране на скрийншот: {str(e)}")
+        logger.error(f"Грешка при извличане на кадър: {str(e)}")
         import traceback
         logger.error(f"Stack trace: {traceback.format_exc()}")
         update_capture_config(status="error")
         return False
 
-# Използваме симулация на камера
-logger.info("Използваме генерирани изображения вместо реална камера")
-# Задаваме генерирането на изображения като основна функция
-capture_frame = generate_screenshot
+# Използваме този метод, който работи в rtsptrend
+logger.info("Използваме същия метод за скрийншоти като в rtsptrend приложението")
 
 def get_placeholder_image() -> bytes:
     """Създава placeholder изображение, когато няма наличен кадър"""
