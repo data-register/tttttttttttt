@@ -395,27 +395,8 @@ def ptz_cycle_routine():
                 logger.info(f"Изчакване {config.capture_delay} секунди преди снимка")
                 time.sleep(config.capture_delay)  # Просто изчакване без прекъсване
                 
-                # Опитваме да направим снимка (с повече опити)
-                try:
-                    from modules.capture.capture import capture_frame
-                    logger.info("====== Опит за заснемане на кадър ======")
-                    
-                    # Правим 3 опита за снимане
-                    result = False
-                    for attempt in range(1, 4):
-                        logger.info(f"Опит за снимане #{attempt}")
-                        result = capture_frame()
-                        if result:
-                            logger.info(f"Снимането успешно на опит {attempt}")
-                            break
-                        
-                        # Кратко изчакване преди следващия опит
-                        time.sleep(2)
-                    
-                    logger.info(f"Краен резултат от заснемането: {'успешно' if result else 'неуспешно след 3 опита'}")
-                except Exception as e:
-                    logger.error(f"Грешка при заснемане на кадър: {str(e)}")
-                    logger.error(f"Stack trace: {traceback.format_exc()}")
+                # Тук може да се добави друга логика за всеки пресет
+                logger.info(f"Достигнат пресет {preset}")
                 
                 # Изчакваме на тази позиция
                 logger.info(f"Изчакване на пресет {preset} за {config.dwell_time} секунди")

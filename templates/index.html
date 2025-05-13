@@ -106,10 +106,6 @@
         <p>Система за управление на ONVIF PTZ камера с автоматичен цикъл</p>
     </div>
     
-    <div class="main-image">
-        <img src="/latest.jpg?ts={{ timestamp }}" alt="Текущ кадър от камерата">
-    </div>
-    
     <div class="modules-container">
         <!-- PTZ Control Module -->
         <div class="module-card">
@@ -125,20 +121,6 @@
             <a href="/ptz" class="module-button">Управление</a>
         </div>
         
-        <!-- Capture Module -->
-        <div class="module-card">
-            <div class="module-icon">📸</div>
-            <div class="module-title">Image Capture</div>
-            <div class="module-description">
-                Заснемане на изображения от камерата
-            </div>
-            <div class="module-status">
-                <div class="status-indicator status-{{ 'active' if capture_config.status == 'ok' else 'warning' if capture_config.status == 'initializing' else 'inactive' }}"></div>
-                <span>{{ 'Активен' if capture_config.status == 'ok' else 'Инициализиране' if capture_config.status == 'initializing' else 'Неактивен' }}</span>
-            </div>
-            <a href="/capture/capture_now" class="module-button">Направи снимка</a>
-        </div>
-        
         <!-- Current Configuration -->
         <div class="module-card">
             <div class="module-icon">⚙️</div>
@@ -147,8 +129,8 @@
                 Текуща конфигурация на системата
             </div>
             <div class="module-status">
-                <div class="status-indicator status-{{ 'active' if ptz_config.status == 'ok' and capture_config.status == 'ok' else 'warning' }}"></div>
-                <span>{{ 'Активна' if ptz_config.status == 'ok' and capture_config.status == 'ok' else 'Частично активна' }}</span>
+                <div class="status-indicator status-{{ 'active' if ptz_config.status == 'ok' else 'warning' }}"></div>
+                <span>{{ 'Активна' if ptz_config.status == 'ok' else 'Частично активна' }}</span>
             </div>
             <a href="/health" class="module-button">Проверка</a>
         </div>
@@ -185,34 +167,10 @@
             </div>
             <a href="/ptz/status" class="module-button">Детайли</a>
         </div>
-        
-        <!-- Latest Frame -->
-        <div class="module-card">
-            <div class="module-icon">🖼️</div>
-            <div class="module-title">Последен кадър</div>
-            <div class="module-description">
-                Последен заснет кадър от камерата
-            </div>
-            <div class="module-status">
-                <div class="status-indicator status-{{ 'active' if capture_config.status == 'ok' else 'inactive' }}"></div>
-                <span>{{ 'Наличен' if capture_config.status == 'ok' else 'Недостъпен' }}</span>
-            </div>
-            <a href="/latest.jpg" class="module-button">Отвори</a>
-        </div>
     </div>
     
     <div class="footer">
         <p>PTZ Camera Control System &copy; 2025</p>
     </div>
-    
-    <script>
-        // Автоматично обновяване на изображението всеки 10 секунди
-        setInterval(function() {
-            const img = document.querySelector('.main-image img');
-            if (img) {
-                img.src = '/latest.jpg?ts=' + Date.now();
-            }
-        }, 10000);
-    </script>
 </body>
 </html>

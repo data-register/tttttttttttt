@@ -1,1 +1,18 @@
 **/.claude/settings.local.json
+
+# Директории
+__pycache__/
+*.py[cod]
+*$py.class
+.cache/
+.local/
+.config/
+frames/
+logs/
+static/
+test_capture.py
+verify_integration.py
+
+# Старо capture модулно приложение и тестове
+trsptrend/
+modules/capture/

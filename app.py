@@ -1,6 +1,6 @@
 """
 Основно приложение на PTZ Camera Control System
-Този файл инициализира FastAPI приложението и зарежда всички модули.
+Този файл инициализира FastAPI приложението и зарежда PTZ модула.
 Оптимизирано за работа в Hugging Face Space.
 """
 
@@ -9,15 +9,13 @@ import time
 import uvicorn
 from datetime import datetime
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 # Импортиране на модули
 from modules.onvif_ptz import router as ptz_router
 from modules.onvif_ptz.config import get_ptz_config
-from modules.capture import router as capture_router
-from modules.capture.config import get_capture_config
 from utils.logger import setup_logger
 
 # Инициализиране на логване
@@ -39,7 +37,7 @@ logger.info(f"Настройка на XDG_CACHE_HOME: {os.environ['XDG_CACHE_HOM
 # Създаваме всички необходими директории
 logger.info("Инициализиране на директории...")
 required_dirs = [
-    "static", "templates", "frames", "logs", "/tmp/.cache"
+    "static", "templates", "logs", "/tmp/.cache"
 ]
 
 # Допълнителни директории, които могат да бъдат нужни
@@ -79,9 +77,6 @@ for dir_path in additional_dirs:
 # Конфигуриране на статични файлове и шаблони
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
-
-# Регистриране на модулите с обработка на изключения
-# Инициализираме модулите
 
 # Функция за безопасно инициализиране на модул
 def initialize_module(module_name, router, prefix, tags, retries=2, retry_delay=2):
@@ -124,32 +119,25 @@ def initialize_module(module_name, router, prefix, tags, retries=2, retry_delay=
     
     return success
 
-# Инициализираме модулите в правилния ред
-capture_initialized = initialize_module(
-    "capture", capture_router, "/capture", ["Image Capture"]
-)
-
+# Инициализираме PTZ модула
 ptz_initialized = initialize_module(
     "onvif_ptz", ptz_router, "/ptz", ["PTZ Control"]
 )
 
 # Определяме кои модули са инициализирани успешно
 initialized_modules = []
-if capture_initialized:
-    initialized_modules.append("Image Capture")
 if ptz_initialized:
     initialized_modules.append("ONVIF PTZ")
 
-# Логирование, какие модули были инициализированы
+# Логиране на инициализираните модули
 logger.info(f"Инициализирани модули: {', '.join(initialized_modules)}")
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Главна страница с информация за системата"""
     
-    # Вземаме информация от модулите
+    # Вземаме информация от PTZ модула
     ptz_config = get_ptz_config()
-    capture_config = get_capture_config()
     
     # Добавяме информация за Hugging Face
     is_hf_space = os.environ.get('SPACE_ID') is not None
@@ -158,7 +146,6 @@ async def index(request: Request):
         "request": request,
         "title": "PTZ Camera Control System",
         "ptz_config": ptz_config,
-        "capture_config": capture_config,
         "timestamp": int(time.time()) if 'time' in globals() else 0,
         "is_hf_space": is_hf_space
     })
@@ -167,7 +154,6 @@ async def index(request: Request):
 async def health():
     """Проверка на здравословното състояние на системата"""
     ptz_config = get_ptz_config()
-    capture_config = get_capture_config()
     
     # Добавяме информация за средата
     is_hf_space = os.environ.get('SPACE_ID') is not None
@@ -177,8 +163,7 @@ async def health():
         "status": "healthy",
         "version": "1.0.0",
         "modules": {
-            "ptz_control": ptz_config.status,
-            "capture": capture_config.status
+            "ptz_control": ptz_config.status
         },
         "environment": {
             "is_huggingface": is_hf_space,
@@ -187,35 +172,6 @@ async def health():
                              if 'datetime' in globals() else None)
         }
     }
-
-# Маршрут за пренасочване към последната снимка
-@app.get("/latest.jpg")
-async def latest_image_redirect():
-    """Връща последното изображение от камерата"""
-    try:
-        # Списък с възможни места, където може да е изображението
-        possible_paths = [
-            "static/latest.jpg",
-            os.path.join("frames", "latest.jpg")
-        ]
-
-        # Проверяваме в различните места
-        for path in possible_paths:
-            if os.path.exists(path):
-                file_size = os.path.getsize(path)
-                if file_size > 0:
-                    logger.info(f"Serving latest.jpg from {path}, size: {file_size} bytes")
-                    return FileResponse(path, media_type="image/jpeg")
-        
-        # Не намерихме съществуващо изображение, пренасочваме към capture модула,
-        # който ще се опита да направи нова снимка
-        return RedirectResponse(url="/capture/latest.jpg")
-    except Exception as e:
-        logger.error(f"Грешка при опит за достъп до latest.jpg: {str(e)}")
-        # Пренасочване към capture модула като последна опция
-        return RedirectResponse(url="/capture/latest.jpg")
-
-# Модулите за работа с дата и време са преместени в началото на файла
 
 if __name__ == "__main__":
     # Настройки от environment променливи
@@ -233,7 +189,7 @@ if __name__ == "__main__":
         f"Стартиране на PTZ Camera Control System "
         f"на {host}:{port} {space_info}"
     )
-    logger.info("Инициализирани модули: ONVIF PTZ, Image Capture")
+    logger.info("Инициализирани модули: ONVIF PTZ")
     
     # Стартиране на сървъра с подходящи настройки за Hugging Face
     uvicorn.run(
