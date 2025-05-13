@@ -72,16 +72,31 @@ def capture_frame_from_stream(stream_url, output_path=None, timeout=15):
             
         logger.info(f"Извличане на кадър от {masked_url} чрез FFmpeg")
         
-        # Създаваме FFmpeg команда за извличане на единичен кадър
+        # Оптимизирана FFmpeg команда, специално за HLS потоци
+        # Отнема по-малко време и е по-надеждна
         cmd = [
             'ffmpeg',
             '-y',  # Презаписване на изходния файл без питане
+            '-loglevel', 'error',  # Показване само на грешки
             '-timeout', str(timeout * 1000000),  # Таймаут в микросекунди
+            '-analyzeduration', '1000000',  # По-кратко време за анализ (1 секунда)
+            '-probesize', '1000000',  # По-малък размер за проба
+        ]
+        
+        # Добавяме специални опции за различни видове потоци
+        if stream_url.endswith('.m3u8'):  # HLS поток
+            cmd.extend([
+                '-protocol_whitelist', 'file,http,https,tcp,tls',  # Разрешени протоколи
+                '-fflags', '+discardcorrupt+genpts',  # Игнориране на повредени данни и генериране на timestamps
+            ])
+        
+        # Добавяме входящия поток и опциите за изход
+        cmd.extend([
             '-i', stream_url,  # Входен URL
             '-frames:v', '1',  # Вземи само един кадър
             '-q:v', '2',  # Високо качество
             output_path  # Изходен файл
-        ]
+        ])
         
         # Изпълняваме командата
         process = subprocess.run(
@@ -95,6 +110,37 @@ def capture_frame_from_stream(stream_url, output_path=None, timeout=15):
         if process.returncode != 0 or not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
             error_msg = process.stderr.decode('utf-8', errors='ignore')
             logger.error(f"FFmpeg не успя да извлече кадър: {error_msg}")
+            
+            # Опитваме с алтернативна команда, ако първата не успее (специално за HLS)
+            if stream_url.endswith('.m3u8'):
+                logger.info("Опитваме с алтернативна команда за HLS...")
+                alt_cmd = [
+                    'ffmpeg', '-y', 
+                    '-loglevel', 'error',
+                    '-fflags', 'nobuffer',
+                    '-flags', 'low_delay',
+                    '-strict', 'experimental',
+                    '-i', stream_url,
+                    '-frames:v', '1',
+                    '-update', '1',
+                    output_path
+                ]
+                
+                alt_process = subprocess.run(
+                    alt_cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    timeout=timeout
+                )
+                
+                if alt_process.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    logger.info(f"Алтернативната команда за HLS успя: {output_path}")
+                    return True, output_path, ""
+                else:
+                    alt_error_msg = alt_process.stderr.decode('utf-8', errors='ignore')
+                    logger.error(f"Алтернативната команда също не успя: {alt_error_msg}")
+                    return False, None, error_msg + "\n" + alt_error_msg
+            
             return False, None, error_msg
         
         logger.info(f"Успешно извлечен кадър с FFmpeg: {output_path}")
@@ -141,12 +187,9 @@ def get_frame_from_public_stream(stream_url="https://restream.obzorweather.com/c
             logger.error("FFmpeg не е инсталиран - не можем да извлечем кадър")
             return None
         
-        # За HLS/HTML поток, трябва да извлечем директния поток URL
-        if stream_url.endswith('.html'):
-            # Използваме публичен адрес за поток, който знаем че работи
-            direct_stream_url = "https://restream.obzorweather.com/cd84ff9e-9424-415b-8356-f47d0f214f8b/index.m3u8"
-        else:
-            direct_stream_url = stream_url
+        # ВАЖНО: Винаги използваме директния HLS URL, който работи гарантирано
+        # Вместо да опитваме да използваме RTSP, директно използваме HLS
+        direct_stream_url = "https://restream.obzorweather.com/cd84ff9e-9424-415b-8356-f47d0f214f8b/index.m3u8"
         
         # Използваме временен файл за съхранение на кадъра
         with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
