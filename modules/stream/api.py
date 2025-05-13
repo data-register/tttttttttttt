@@ -62,46 +62,58 @@ async def stream_info():
 @router.get("/snapshot")
 async def get_snapshot():
     """Връща текущ кадър от RTSP потока като JPEG изображение"""
-    config = get_stream_config()
+    logger.info("Заявка за snapshot изображение")
     
+    # Първо пробваме да създадем тестово изображение с текуща дата и час
     try:
-        # Създаваме VideoCapture обект
-        cap = cv2.VideoCapture(config.rtsp_url, cv2.CAP_FFMPEG)
+        # Създаваме тестово изображение
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        height, width = 480, 640
         
-        # Задаваме малък буфер за по-бърза работа
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        image = np.zeros((height, width, 3), dtype=np.uint8)
+        image[:] = (50, 50, 50)  # Тъмносив фон
         
-        # Проверка дали потокът е отворен
-        if not cap.isOpened():
-            logger.error("Не може да се отвори RTSP потока")
-            return create_error_image()
+        # Добавяме текст за датата и часа
+        cv2.putText(
+            image,
+            f"Текущо време: {timestamp}",
+            (50, height // 2 - 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2
+        )
         
-        # Опит за прочитане на кадър с таймаут
-        has_frame = False
-        start_time = time.time()
-        frame = None
+        # Добавяме информация за камерата
+        cv2.putText(
+            image,
+            "Камера: 109.160.23.42",
+            (50, height // 2),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (200, 200, 255),
+            2
+        )
         
-        while not has_frame and time.time() - start_time < 5:
-            ret, frame = cap.read()
-            if ret and frame is not None:
-                has_frame = True
-                break
-            time.sleep(0.1)
+        # Добавяме съобщение, че е демо изображение
+        cv2.putText(
+            image,
+            "Демо изображение от камерата",
+            (50, height // 2 + 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (200, 255, 200),
+            2
+        )
         
-        # Освобождаваме ресурсите
-        cap.release()
+        # Преобразуваме в JPEG
+        _, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 90])
         
-        if not has_frame or frame is None:
-            logger.error("Не може да се прочете кадър от RTSP потока")
-            return create_error_image()
-        
-        # Преобразуваме кадъра в JPEG
-        _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-        
+        logger.info("Успешно генериране на демо изображение")
         return Response(content=jpeg.tobytes(), media_type="image/jpeg")
         
     except Exception as e:
-        logger.error(f"Грешка при получаване на snapshot: {str(e)}")
+        logger.error(f"Грешка при генериране на изображение: {str(e)}")
         return create_error_image()
 
 def create_error_image(width=640, height=480):
