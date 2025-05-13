@@ -156,7 +156,7 @@ def capture_frame_from_stream(stream_url, output_path=None, timeout=15):
         logger.error(f"Stack trace: {traceback.format_exc()}")
         return False, None, str(e)
 
-def get_frame_from_public_stream(stream_url="rtsp://admin:admin@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0", force_refresh=False, max_cache_age=5):
+def get_frame_from_public_stream(stream_url="rtsp://admin:L20E0658@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif", force_refresh=False, max_cache_age=5):
     """
     Извлича кадър от публичен видео поток с използване на кеш - локална версия
     
@@ -182,8 +182,16 @@ def get_frame_from_public_stream(stream_url="rtsp://admin:admin@109.160.23.42:55
         # Ако нямаме кеширан кадър, продължаваме с извличане на нов
         logger.info(f"Извличане на нов кадър от поток {stream_url}")
         
-        # Използваме директно подадения URL
-        rtsp_url = stream_url
+        # Проверяваме дали полученият URL е HTML или RTSP
+        if "restream.obzorweather.com" in stream_url and stream_url.endswith('.html'):
+            # Ако е HTML страница, извличаме кадър от публичния поток
+            logger.info(f"Получен HTML поток, опитваме с RTSP потока")
+            html_url = stream_url
+            # RTSP поток от камерата
+            rtsp_url = "rtsp://admin:L20E0658@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"
+        else:
+            # Използваме директно подадения URL
+            rtsp_url = stream_url
         
         # Създаваме frames директория ако не съществува
         frames_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frames")

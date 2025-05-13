@@ -27,8 +27,8 @@ templates_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__f
 templates = Jinja2Templates(directory=templates_dir)
 
 @router.get("/view", response_class=HTMLResponse)
-async def stream_view(request: Request):
-    """Страница за визуализиране на RTSP поток"""
+async def stream_view(request: Request, html_mode: bool = Query(True, description="Използвай HTML поток вместо RTSP")):
+    """Страница за визуализиране на поток"""
     config = get_stream_config()
     
     # Безопасен URL за показване, без паролата
@@ -36,13 +36,18 @@ async def stream_view(request: Request):
     if config.auth_password:
         safe_url = safe_url.replace(config.auth_password, "********")
     
+    # Избираме дали да използваме HTML или RTSP
+    use_html = html_mode
+    
     # Връщаме стрийминг страницата
     return templates.TemplateResponse("stream_view.html", {
         "request": request,
         "title": "Видео от камерата",
         "rtsp_url": safe_url,
         "auth_username": config.auth_username,
-        "auth_password": "********"  # Никога не показваме истинската парола в HTML
+        "auth_password": "********",  # Никога не показваме истинската парола в HTML
+        "use_html": use_html,
+        "html_url": "https://restream.obzorweather.com/cd84ff9e-9424-415b-8356-f47d0f214f8b.html"
     })
 
 @router.get("/info")
@@ -74,7 +79,7 @@ async def get_snapshot(force_refresh: bool = Query(False, description="Задъ�
         logger.warning("FFmpeg не е инсталиран локално. Инсталирайте с: apt-get install ffmpeg")
     
     # Определяме URL на потока (използваме подадения или стандартния)
-    stream_url = rtsp_url if rtsp_url else "rtsp://admin:admin@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0"
+    stream_url = rtsp_url if rtsp_url else "rtsp://admin:L20E0658@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"
     
     try:
         # Проверяваме за наличен latest.jpg файл, който се използва за локален достъп

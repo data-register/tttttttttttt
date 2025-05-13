@@ -121,15 +121,29 @@
         <div id="live-tab" class="tab-content active">
             <div class="video-container">
                 <div class="iframe-container">
-                    <iframe src="https://restream.obzorweather.com/cd84ff9e-9424-415b-8356-f47d0f214f8b.html" 
+                    {% if use_html %}
+                    <!-- HTML поток -->
+                    <iframe src="{{ html_url }}" 
                             allowfullscreen allow="autoplay; fullscreen"></iframe>
+                    {% else %}
+                    <!-- RTSP поток - локална версия -->
+                    <video id="rtspPlayer" autoplay controls style="width:100%; height:100%;">
+                        <source src="{{ rtsp_url }}" type="application/x-rtsp" />
+                        Вашият браузър не поддържа директно възпроизвеждане на RTSP.
+                    </video>
+                    {% endif %}
                 </div>
             </div>
             
             <div class="info">
-                <h3>Публичен поток</h3>
-                <p>В момента гледате публичен поток от камерата.</p>
-                <p>Забележка: В случай на проблеми, моля използвайте разделът "Единичен кадър".</p>
+                <h3>Видео поток</h3>
+                <p>В момента гледате {% if use_html %}публичен HTML{% else %}директен RTSP{% endif %} поток от камерата.</p>
+                <p>Забележка: В случай на проблеми, моля използвайте разделът "Единичен кадър" или превключете режима.</p>
+                <p>
+                    <a href="?html_mode={% if use_html %}false{% else %}true{% endif %}" class="button">
+                        Превключи към {% if use_html %}RTSP{% else %}HTML{% endif %} поток
+                    </a>
+                </p>
             </div>
         </div>
         
