@@ -22,14 +22,16 @@ def capture_frame() -> bool:
     config = get_capture_config()
     
     try:
-        logger.info(f"Опит за свързване с RTSP поток: {config.rtsp_url}")
+        # Налагаме използването на точния URL адрес
+        rtsp_url = "rtsp://109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"
+        logger.info(f"Опит за свързване с RTSP поток: {rtsp_url}")
         
         # Създаваме VideoCapture обект директно с FFMPEG backend
-        cap = cv2.VideoCapture(config.rtsp_url, cv2.CAP_FFMPEG)
+        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
         
         # Проверяваме дали потокът е отворен
         if not cap.isOpened():
-            logger.error(f"Не може да се отвори RTSP потока: {config.rtsp_url}")
+            logger.error(f"Не може да се отвори RTSP потока: {rtsp_url}")
             update_capture_config(status="error")
             return False
         
