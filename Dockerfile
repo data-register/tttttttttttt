@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxrender1 \
     libxext6 \
     wget \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Копиране и инсталиране на Python зависимости

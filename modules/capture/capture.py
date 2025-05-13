@@ -23,20 +23,129 @@ logger = setup_logger("capture")
 import logging
 logger.setLevel(logging.DEBUG)
 
+def get_rtsp_url_with_auth():
+    """Създава RTSP URL с вградена автентикация"""
+    rtsp_user = os.getenv("RTSP_USER", "admin")
+    rtsp_pass = os.getenv("RTSP_PASS", "L20E0658")
+    rtsp_url = f"rtsp://{rtsp_user}:{rtsp_pass}@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"
+    return rtsp_url
+
+def get_rtsp_url_for_log():
+    """Създава маскиран URL за логове"""
+    rtsp_url = get_rtsp_url_with_auth()
+    rtsp_pass = os.getenv("RTSP_PASS", "L20E0658")
+    return rtsp_url.replace(rtsp_pass, "*****")
+
+def capture_frame_opencv() -> bool:
+    """Извлича един кадър от RTSP потока използвайки OpenCV"""
+    config = get_capture_config()
+
+    try:
+        # Използваме URL с автентикация
+        rtsp_url = get_rtsp_url_with_auth()
+        log_url = get_rtsp_url_for_log()
+        logger.info(f"Опит за свързване с RTSP поток чрез OpenCV: {log_url}")
+        
+        # Създаваме директориите ако не съществуват
+        os.makedirs(config.save_dir, exist_ok=True)
+        os.makedirs("static", exist_ok=True)
+        
+        # Опции за VideoCapture
+        cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
+        
+        # Задаваме таймаут и буфер
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Малък буфер за по-бърза работа
+        
+        # Проверка за успешно отваряне
+        if not cap.isOpened():
+            logger.error(f"Не може да се отвори RTSP потока: {log_url}")
+            update_capture_config(status="error")
+            return False
+        
+        # Прочитаме кадър
+        max_retries = 3
+        for retry in range(max_retries):
+            ret, frame = cap.read()  # Извличаме кадър
+            if ret and frame is not None:
+                break  # Успешно извлечен кадър
+            logger.warning(f"Неуспешен опит {retry+1}/{max_retries} за извличане на кадър")
+            time.sleep(0.5)  # Малко изчакване между опитите
+        
+        # Освобождаваме ресурсите
+        cap.release()
+        
+        # Проверка за успешно извлечен кадър
+        if not ret or frame is None:
+            logger.error("Не може да се извлече кадър от RTSP потока")
+            update_capture_config(status="error")
+            return False
+        
+        # Преоразмеряваме кадъра, ако е нужно
+        if config.width > 0 and config.height > 0:
+            frame = cv2.resize(frame, (config.width, config.height))
+        
+        # Генерираме име на файла с текущата дата и час
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"frame_{timestamp}.jpg"
+        filepath = os.path.join(config.save_dir, filename)
+        
+        # Записваме кадъра във всички нужни локации
+        encode_params = [cv2.IMWRITE_JPEG_QUALITY, config.quality]
+        success_paths = []
+        
+        # 1. Архивно копие с timestamp
+        try:
+            cv2.imwrite(filepath, frame, encode_params)
+            success_paths.append(filepath)
+        except Exception as e:
+            logger.warning(f"Не може да се запише в {filepath}: {str(e)}")
+        
+        # 2. latest.jpg в основната директория
+        latest_path = os.path.join(config.save_dir, "latest.jpg")
+        try:
+            cv2.imwrite(latest_path, frame, encode_params)
+            success_paths.append(latest_path)
+        except Exception as e:
+            logger.warning(f"Не може да се запише в {latest_path}: {str(e)}")
+        
+        # 3. static/latest.jpg за web достъп
+        static_path = "static/latest.jpg"
+        try:
+            cv2.imwrite(static_path, frame, encode_params)
+            success_paths.append(static_path)
+        except Exception as e:
+            logger.warning(f"Не може да се запише в {static_path}: {str(e)}")
+        
+        # Проверка дали поне един запис е успешен
+        if not success_paths:
+            logger.error("Не може да се запише кадърът в нито една локация")
+            update_capture_config(status="error")
+            return False
+        
+        # Обновяваме конфигурацията
+        update_capture_config(
+            last_frame_path=filepath,
+            last_frame_time=datetime.now(),
+            status="ok"
+        )
+        
+        logger.info(f"Успешно запазен кадър в: {', '.join(success_paths)}")
+        return True
+    except Exception as e:
+        logger.error(f"Грешка при извличане на кадър с OpenCV: {str(e)}")
+        import traceback
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        update_capture_config(status="error")
+        return False
+
 def capture_frame_ffmpeg() -> bool:
     """Извлича един кадър от RTSP потока използвайки FFmpeg директно"""
     config = get_capture_config()
 
     try:
-        # Вземаме потребителско име и парола от конфигурацията
-        rtsp_user = os.getenv("RTSP_USER", "admin")
-        rtsp_pass = os.getenv("RTSP_PASS", "L20E0658")
-        
-        # Използваме точния URL адрес с включена автентикация
-        rtsp_url = f"rtsp://{rtsp_user}:{rtsp_pass}@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"
-        
-        # Маскираме паролата в лога за сигурност
-        log_url = rtsp_url.replace(rtsp_pass, "*****")
+        # Използваме URL с автентикация
+        rtsp_url = get_rtsp_url_with_auth()
+        log_url = get_rtsp_url_for_log()
         logger.info(f"Опит за свързване с RTSP поток чрез FFmpeg: {log_url}")
 
         # Създаваме временен файл за изображението
@@ -164,11 +273,23 @@ def capture_frame_ffmpeg() -> bool:
             os.unlink(output_path)
         return False
 
-# Задаваме функцията за прихващане на кадри да използва FFmpeg
-capture_frame = capture_frame_ffmpeg
+# Проверка за наличие на FFmpeg и избор на подходящ метод
+def is_ffmpeg_available():
+    """Проверява дали FFmpeg е наличен в системата"""
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        return False
 
-# Добавяме изрично логване
-logger.info("Зададена основна функция за прихващане на кадри: FFmpeg подход")
+# Проверка за наличие на FFmpeg и избор на подходящ метод
+use_ffmpeg = is_ffmpeg_available()
+if use_ffmpeg:
+    logger.info("FFmpeg намерен - използваме FFmpeg метода за прихващане на кадри")
+    capture_frame = capture_frame_ffmpeg
+else:
+    logger.info("FFmpeg не е намерен - използваме OpenCV метода за прихващане на кадри")
+    capture_frame = capture_frame_opencv
 
 def get_placeholder_image() -> bytes:
     """Създава placeholder изображение, когато няма наличен кадър"""

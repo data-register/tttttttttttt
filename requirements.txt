@@ -10,3 +10,6 @@ pillow
 requests
 python-dotenv
 onvif-zeep==0.2.12
+
+# FFmpeg е опционален, но се препоръчва за по-надеждно приложение
+# Инсталира се с apt: sudo apt-get install -y ffmpeg
