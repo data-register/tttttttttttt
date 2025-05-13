@@ -24,11 +24,19 @@
             overflow: hidden;
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
-        iframe {
+        .iframe-container {
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 аспектно съотношение */
+            height: 0;
+            overflow: hidden;
+        }
+        .iframe-container iframe {
+            position: absolute;
+            top: 0;
+            left: 0;
             width: 100%;
-            height: 600px;
-            display: block;
-            border: none;
+            height: 100%;
+            border: 0;
         }
         img.snapshot {
             width: 100%;
@@ -69,6 +77,28 @@
             margin: 10px 0;
             font-weight: bold;
         }
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+        }
+        .tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            background-color: #ddd;
+            cursor: pointer;
+            border-radius: 4px 4px 0 0;
+        }
+        .tab.active {
+            background-color: #0066cc;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
         .info {
             background-color: white;
             padding: 15px;
@@ -81,39 +111,72 @@
 <body>
     <div class="container">
         <a href="/" class="back-button">← Назад към началната страница</a>
-        <h1>RTSP Стриминг</h1>
+        <h1>Видео от камерата</h1>
         
-        <div class="info">
-            <p><strong>Директен поток от камерата:</strong></p>
-            <p><code>{{ rtsp_url }}</code></p>
-            <p><em>Забележка: Можете да отворите този поток директно с VLC Player или други RTSP плейъри.</em></p>
+        <div class="tabs">
+            <div class="tab active" data-tab="live">Реално време</div>
+            <div class="tab" data-tab="snapshot">Единичен кадър</div>
         </div>
         
-        <div class="video-container">
-            <img id="snapshotImage" class="snapshot" src="/static/img/camera-placeholder.jpg" alt="Кадър от камерата">
+        <div id="live-tab" class="tab-content active">
+            <div class="video-container">
+                <div class="iframe-container">
+                    <iframe src="https://restream.obzorweather.com/cd84ff9e-9424-415b-8356-f47d0f214f8b.html" 
+                            allowfullscreen allow="autoplay; fullscreen"></iframe>
+                </div>
+            </div>
+            
+            <div class="info">
+                <h3>Публичен поток</h3>
+                <p>В момента гледате публичен поток от камерата.</p>
+                <p>Забележка: В случай на проблеми, моля използвайте разделът "Единичен кадър".</p>
+            </div>
         </div>
         
-        <div class="controls">
-            <button class="button" id="refreshButton">Обнови кадъра</button>
+        <div id="snapshot-tab" class="tab-content">
+            <div class="video-container">
+                <img id="snapshotImage" class="snapshot" src="/static/img/camera-placeholder.jpg" alt="Кадър от камерата">
+            </div>
+            
+            <div class="controls">
+                <button class="button" id="refreshButton">Обнови кадъра</button>
+            </div>
+            
+            <div class="info">
+                <h3>Статичен кадър</h3>
+                <p>Тук можете да видите най-новия кадър от камерата.</p>
+                <p>Използвайте бутона "Обнови кадъра" за да заредите нов кадър.</p>
+            </div>
+            
+            <div class="info">
+                <h3>RTSP информация:</h3>
+                <p>Адрес: <code>{{ rtsp_url }}</code></p>
+                <p>За гледане на живо видео извън браузъра използвайте VLC Player.</p>
+            </div>
         </div>
         
-        <div class="info">
-            <h3>Инструкции:</h3>
-            <p>1. Използвайте бутона "Обнови кадъра" за да заредите нов кадър от камерата</p>
-            <p>2. За гледане на живо видео, използвайте VLC Player със следните стъпки:</p>
-            <ul>
-                <li>Отворете VLC Player</li>
-                <li>Изберете Media -> Open Network Stream</li>
-                <li>Въведете RTSP URL: <code>{{ rtsp_url }}</code></li>
-                <li>Натиснете "Play"</li>
-            </ul>
-        </div>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
+            const tabs = document.querySelectorAll('.tab');
+            const tabContents = document.querySelectorAll('.tab-content');
             const refreshButton = document.getElementById('refreshButton');
             const snapshotImage = document.getElementById('snapshotImage');
+            
+            // Табове
+            tabs.forEach(tab => {
+                tab.addEventListener('click', function() {
+                    // Премахване на активната класа от всички табове
+                    tabs.forEach(t => t.classList.remove('active'));
+                    tabContents.forEach(c => c.classList.remove('active'));
+                    
+                    // Добавяне на активна класа към избрания таб
+                    this.classList.add('active');
+                    const tabId = this.getAttribute('data-tab');
+                    document.getElementById(tabId + '-tab').classList.add('active');
+                });
+            });
             
             // Функция за зареждане на нов кадър
             function refreshSnapshot() {
@@ -125,11 +188,10 @@
             // Слушател за бутона
             refreshButton.addEventListener('click', refreshSnapshot);
             
-            // Автоматично зареждане при отваряне на страницата
-            refreshSnapshot();
-            
-            // Автоматично обновяване на всеки 10 секунди
-            setInterval(refreshSnapshot, 10000);
+            // Автоматично зареждане на кадър, ако сме на този таб
+            if (document.getElementById('snapshot-tab').classList.contains('active')) {
+                refreshSnapshot();
+            }
         });
     </script>
 </body>

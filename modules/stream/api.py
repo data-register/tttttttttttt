@@ -37,7 +37,7 @@ async def stream_view(request: Request):
     # Връщаме стрийминг страницата
     return templates.TemplateResponse("stream_view.html", {
         "request": request,
-        "title": "RTSP Стрийминг",
+        "title": "Видео от камерата",
         "rtsp_url": safe_url,
         "auth_username": config.auth_username,
         "auth_password": "********"  # Никога не показваме истинската парола в HTML

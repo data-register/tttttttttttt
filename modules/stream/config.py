@@ -24,6 +24,9 @@ rtsp_url = os.getenv("RTSP_URL", f"rtsp://{rtsp_host}:{rtsp_port}/cam/realmonito
 # Създаваме URL с аутентикация
 rtsp_url_with_auth = f"rtsp://{rtsp_user}:{rtsp_pass}@{rtsp_host}:{rtsp_port}/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"
 
+# Алтернативен URL за обществен поток
+alternative_stream_url = "https://restream.obzorweather.com/cd84ff9e-9424-415b-8356-f47d0f214f8b.html"
+
 # Глобална конфигурация
 _config = StreamConfig(
     rtsp_url=rtsp_url_with_auth,
