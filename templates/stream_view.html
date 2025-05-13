@@ -24,7 +24,13 @@
             overflow: hidden;
             box-shadow: 0 4px 8px rgba(0,0,0,0.2);
         }
-        video {
+        iframe {
+            width: 100%;
+            height: 600px;
+            display: block;
+            border: none;
+        }
+        img.snapshot {
             width: 100%;
             height: auto;
             display: block;
@@ -70,20 +76,6 @@
             margin: 20px 0;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
-        .error {
-            color: #d9534f;
-        }
-        .success {
-            color: #5cb85c;
-        }
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 300px;
-            font-size: 18px;
-            color: white;
-        }
     </style>
 </head>
 <body>
@@ -91,110 +83,53 @@
         <a href="/" class="back-button">← Назад към началната страница</a>
         <h1>RTSP Стриминг</h1>
         
-        <div class="video-container" id="videoContainer">
-            <div class="loading" id="loadingMessage">Зареждане на потока...</div>
-            <video id="videoPlayer" controls autoplay muted></video>
+        <div class="info">
+            <p><strong>Директен поток от камерата:</strong></p>
+            <p><code>{{ rtsp_url }}</code></p>
+            <p><em>Забележка: Можете да отворите този поток директно с VLC Player или други RTSP плейъри.</em></p>
         </div>
         
-        <div class="status" id="streamStatus"></div>
+        <div class="video-container">
+            <img id="snapshotImage" class="snapshot" src="/static/img/camera-placeholder.jpg" alt="Кадър от камерата">
+        </div>
         
         <div class="controls">
-            <button class="button" id="playButton">Старт</button>
-            <button class="button" id="stopButton">Стоп</button>
-            <button class="button" id="refreshButton">Обнови</button>
+            <button class="button" id="refreshButton">Обнови кадъра</button>
         </div>
         
         <div class="info">
-            <p><strong>Забележка:</strong> RTSP стриймингът използва WebRTC технология и може да изисква инсталиране на специален сървър за препращане на потока към HTML страница. Различните браузъри и устройства може да имат различна поддръжка.</p>
+            <h3>Инструкции:</h3>
+            <p>1. Използвайте бутона "Обнови кадъра" за да заредите нов кадър от камерата</p>
+            <p>2. За гледане на живо видео, използвайте VLC Player със следните стъпки:</p>
+            <ul>
+                <li>Отворете VLC Player</li>
+                <li>Изберете Media -> Open Network Stream</li>
+                <li>Въведете RTSP URL: <code>{{ rtsp_url }}</code></li>
+                <li>Натиснете "Play"</li>
+            </ul>
         </div>
     </div>
 
-    <!-- RTSP към WebRTC библиотека -->
-    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-    
     <script>
-        const videoElement = document.getElementById('videoPlayer');
-        const loadingElement = document.getElementById('loadingMessage');
-        const statusElement = document.getElementById('streamStatus');
-        const playButton = document.getElementById('playButton');
-        const stopButton = document.getElementById('stopButton');
-        const refreshButton = document.getElementById('refreshButton');
-
-        // RTSP URL от сървъра
-        const rtspUrl = "{{ rtsp_url }}";
-        const username = "{{ auth_username }}";
-        const password = "{{ auth_password }}";
-        
-        // Работа с video.js за RTSP стриймване
-        // В реални проекти обикновено се изисква прокси сървър,
-        // който да преобразува RTSP потока в HLS или WebRTC
-        // Тук използваме само базово вградено видео
-        
-        function initPlayer() {
-            try {
-                // За реални приложения, тук трябва да използвате
-                // прокси като FFmpeg/RTSP към HLS сървър
-                const streamUrl = rtspUrl;
-                
-                statusElement.textContent = "Опит за свързване с RTSP потока...";
-                statusElement.className = "status";
-                
-                // Тъй като браузърите не поддържат директно RTSP,
-                // тук само демонстрираме функционалност
-                // В реална ситуация използвайте прокси сървър
-
-                // За демонстрационни цели - използваме информационно съобщение
-                setTimeout(() => {
-                    statusElement.textContent = "За гледане на RTSP поток в браузър е необходим прокси сървър";
-                    statusElement.className = "status error";
-                    loadingElement.textContent = "Необходим е прокси сървър за преобразуване на RTSP потока";
-                }, 2000);
-            } catch (error) {
-                console.error('Error initializing player:', error);
-                statusElement.textContent = "Грешка при инициализиране: " + error.message;
-                statusElement.className = "status error";
+        document.addEventListener('DOMContentLoaded', function() {
+            const refreshButton = document.getElementById('refreshButton');
+            const snapshotImage = document.getElementById('snapshotImage');
+            
+            // Функция за зареждане на нов кадър
+            function refreshSnapshot() {
+                // Добавяме timestamp към URL за избягване на кеширане
+                const timestamp = new Date().getTime();
+                snapshotImage.src = '/stream/snapshot?' + timestamp;
             }
-        }
-        
-        // Информационно съобщение за настройка
-        function showSetupInfo() {
-            const infoDiv = document.createElement('div');
-            infoDiv.innerHTML = `
-                <h3>Информация за настройка на RTSP стрийминг:</h3>
-                <p>За да гледате RTSP поток в браузър, е необходимо да инсталирате прокси сървър като:</p>
-                <ul>
-                    <li>FFmpeg + Node-Media-Server (преобразува RTSP в HLS или DASH)</li>
-                    <li>RTSP-Simple-Server (поддържа WebRTC)</li>
-                    <li>GStreamer с поддръжка за WebRTC</li>
-                </ul>
-                <p>RTSP адрес на камерата: <code>${rtspUrl.replace(/:[^:\/]{3,}@/, ":******@")}</code></p>
-            `;
-            loadingElement.innerHTML = '';
-            loadingElement.appendChild(infoDiv);
-        }
-        
-        // Събития за бутоните
-        playButton.addEventListener('click', function() {
-            initPlayer();
-        });
-        
-        stopButton.addEventListener('click', function() {
-            videoElement.pause();
-            videoElement.src = '';
-            statusElement.textContent = "Стриймът е спрян";
-            statusElement.className = "status";
-        });
-        
-        refreshButton.addEventListener('click', function() {
-            videoElement.pause();
-            videoElement.src = '';
-            initPlayer();
-        });
-        
-        // Инициализиране при зареждане
-        window.addEventListener('load', function() {
-            // Показваме информация вместо реално зареждане на потока
-            showSetupInfo();
+            
+            // Слушател за бутона
+            refreshButton.addEventListener('click', refreshSnapshot);
+            
+            // Автоматично зареждане при отваряне на страницата
+            refreshSnapshot();
+            
+            // Автоматично обновяване на всеки 10 секунди
+            setInterval(refreshSnapshot, 10000);
         });
     </script>
 </body>
