@@ -121,6 +121,20 @@
             <a href="/ptz" class="module-button">Управление</a>
         </div>
         
+        <!-- Streaming Module -->
+        <div class="module-card">
+            <div class="module-icon">📹</div>
+            <div class="module-title">RTSP Стрийминг</div>
+            <div class="module-description">
+                Гледане на видео поток от камерата
+            </div>
+            <div class="module-status">
+                <div class="status-indicator status-{{ 'active' if stream_config.status == 'ok' else 'warning' if stream_config.status == 'initializing' else 'inactive' }}"></div>
+                <span>{{ 'Активен' if stream_config.status == 'ok' else 'Инициализиране' if stream_config.status == 'initializing' else 'Неактивен' }}</span>
+            </div>
+            <a href="/stream/view" class="module-button">Гледай</a>
+        </div>
+        
         <!-- Current Configuration -->
         <div class="module-card">
             <div class="module-icon">⚙️</div>

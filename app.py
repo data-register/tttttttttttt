@@ -16,6 +16,8 @@ from fastapi.templating import Jinja2Templates
 # Импортиране на модули
 from modules.onvif_ptz import router as ptz_router
 from modules.onvif_ptz.config import get_ptz_config
+from modules.stream import router as stream_router
+from modules.stream.config import get_stream_config
 from utils.logger import setup_logger
 
 # Инициализиране на логване
@@ -119,15 +121,21 @@ def initialize_module(module_name, router, prefix, tags, retries=2, retry_delay=
     
     return success
 
-# Инициализираме PTZ модула
+# Инициализираме модулите
 ptz_initialized = initialize_module(
     "onvif_ptz", ptz_router, "/ptz", ["PTZ Control"]
+)
+
+stream_initialized = initialize_module(
+    "stream", stream_router, "/stream", ["RTSP Streaming"]
 )
 
 # Определяме кои модули са инициализирани успешно
 initialized_modules = []
 if ptz_initialized:
     initialized_modules.append("ONVIF PTZ")
+if stream_initialized:
+    initialized_modules.append("RTSP Streaming")
 
 # Логиране на инициализираните модули
 logger.info(f"Инициализирани модули: {', '.join(initialized_modules)}")
@@ -136,8 +144,9 @@ logger.info(f"Инициализирани модули: {', '.join(initialized_
 async def index(request: Request):
     """Главна страница с информация за системата"""
     
-    # Вземаме информация от PTZ модула
+    # Вземаме информация от модулите
     ptz_config = get_ptz_config()
+    stream_config = get_stream_config()
     
     # Добавяме информация за Hugging Face
     is_hf_space = os.environ.get('SPACE_ID') is not None
@@ -146,6 +155,7 @@ async def index(request: Request):
         "request": request,
         "title": "PTZ Camera Control System",
         "ptz_config": ptz_config,
+        "stream_config": stream_config,
         "timestamp": int(time.time()) if 'time' in globals() else 0,
         "is_hf_space": is_hf_space
     })
@@ -154,6 +164,7 @@ async def index(request: Request):
 async def health():
     """Проверка на здравословното състояние на системата"""
     ptz_config = get_ptz_config()
+    stream_config = get_stream_config()
     
     # Добавяме информация за средата
     is_hf_space = os.environ.get('SPACE_ID') is not None
@@ -163,7 +174,8 @@ async def health():
         "status": "healthy",
         "version": "1.0.0",
         "modules": {
-            "ptz_control": ptz_config.status
+            "ptz_control": ptz_config.status,
+            "rtsp_streaming": stream_config.status
         },
         "environment": {
             "is_huggingface": is_hf_space,
@@ -189,7 +201,7 @@ if __name__ == "__main__":
         f"Стартиране на PTZ Camera Control System "
         f"на {host}:{port} {space_info}"
     )
-    logger.info("Инициализирани модули: ONVIF PTZ")
+    logger.info("Инициализирани модули: ONVIF PTZ, RTSP Streaming")
     
     # Стартиране на сървъра с подходящи настройки за Hugging Face
     uvicorn.run(
