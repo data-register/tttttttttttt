@@ -20,9 +20,31 @@ class CaptureConfig(BaseModel):
     running: bool = True
 
 # Глобална конфигурация на модула
-# Използваме същия RTSP URL като в ONVIF модула, ако не е зададен друг
+# Вземаме данните за връзка от средовите променливи или използваме defaults
+# Забележка: В URL с ONVIF часто имаме отделни credentials от обикновения RTSP достъп
+rtsp_host = os.getenv("RTSP_HOST", "109.160.23.42")
+rtsp_port = os.getenv("RTSP_PORT", "554")
+rtsp_path = os.getenv("RTSP_PATH", "cam/realmonitor")
+rtsp_user = os.getenv("RTSP_USER", "admin")
+rtsp_pass = os.getenv("RTSP_PASS", "L20E0658")
+
+# Построяваме няколко варианта на URL-и, които да пробваме
+rtsp_urls = [
+    f"rtsp://{rtsp_user}:{rtsp_pass}@{rtsp_host}:{rtsp_port}/{rtsp_path}?channel=1&subtype=0", # Без Onvif суфикс
+    f"rtsp://{rtsp_user}:{rtsp_pass}@{rtsp_host}:{rtsp_port}/{rtsp_path}?channel=1&subtype=0&unicast=true&proto=Onvif", # С пълен Onvif суфикс
+    f"rtsp://{rtsp_host}:{rtsp_port}/{rtsp_path}?channel=1&subtype=0", # Без credentials
+    f"rtsp://{rtsp_user}:{rtsp_pass}@{rtsp_host}:{rtsp_port}/ch01/0", # Алтернативен формат
+    f"rtsp://{rtsp_host}:{rtsp_port}/ch01/0", # Алтернативен формат без credentials
+    os.getenv("RTSP_URL", ""), # От средова променлива ако е налична
+    os.getenv("ONVIF_URL", "")  # Onvif URL ако е различен
+]
+
+# Филтрираме празните URL-и
+rtsp_urls = [url for url in rtsp_urls if url]
+
+# Използваме първия URL от списъка като основен
 _config = CaptureConfig(
-    rtsp_url=os.getenv("RTSP_URL", os.getenv("ONVIF_URL", "rtsp://admin:L20E0658@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif")),
+    rtsp_url=rtsp_urls[0] if rtsp_urls else f"rtsp://{rtsp_user}:{rtsp_pass}@{rtsp_host}:{rtsp_port}/{rtsp_path}?channel=1&subtype=0",
     save_dir=os.getenv("SAVE_DIR", "frames"),
     interval=int(os.getenv("INTERVAL", "10")),
     width=int(os.getenv("WIDTH", "1280")),

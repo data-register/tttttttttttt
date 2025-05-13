@@ -18,44 +18,95 @@ from utils.logger import setup_logger
 logger = setup_logger("capture")
 
 
+def try_capture_with_url(url: str, timeout: int = 15) -> tuple:
+    """
+    Опитва се да захване кадър от посочения RTSP URL
+    
+    Args:
+        url: RTSP URL адрес
+        timeout: Таймаут в секунди
+        
+    Returns:
+        tuple: (успех, кадър) - дали е успешно и кадъра ако има такъв
+    """
+    try:
+        logger.info(f"Опит за свързване с RTSP поток: {url}")
+        
+        # Създаваме VideoCapture обект директно с FFMPEG backend
+        cap = cv2.VideoCapture(url, cv2.CAP_FFMPEG)
+        
+        # Проверяваме дали потокът е отворен
+        if not cap.isOpened():
+            logger.warning(f"Не може да се отвори RTSP потока: {url}")
+            cap.release()
+            return False, None
+        
+        logger.info(f"RTSP потокът е отворен успешно: {url}")
+        
+        # Конфигурация за по-добра работа
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 2)  # По-голям буфер
+        
+        # Четем кадъра с таймаут
+        has_frame = False
+        start_time = time.time()
+        frame = None
+        
+        # Правим няколко опита да прочетем кадър
+        retry_count = 0
+        max_retries = 3
+        
+        while not has_frame and time.time() - start_time < timeout and retry_count < max_retries:
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                has_frame = True
+                break
+            
+            # Малко изчакване между опитите
+            time.sleep(0.5)
+            retry_count += 1
+        
+        # Освобождаваме ресурсите
+        cap.release()
+        
+        if has_frame and frame is not None:
+            logger.info(f"Успешно получен кадър от {url}")
+            return True, frame
+        else:
+            logger.warning(f"Не може да се прочете кадър от RTSP потока: {url}")
+            return False, None
+            
+    except Exception as e:
+        logger.warning(f"Грешка при опит за четене от {url}: {str(e)}")
+        return False, None
+
 def capture_frame() -> bool:
     """Извлича един кадър от RTSP потока и го записва като JPEG файл"""
     config = get_capture_config()
     
     try:
-        logger.info(f"Опит за свързване с RTSP поток: {config.rtsp_url}")
+        # Първо опитваме с основния URL
+        success, frame = try_capture_with_url(config.rtsp_url, timeout=15)
         
-        # Създаваме VideoCapture обект директно с FFMPEG backend
-        cap = cv2.VideoCapture(config.rtsp_url, cv2.CAP_FFMPEG)
+        # Ако не успее, опитваме с алтернативни URLs
+        if not success:
+            logger.info("Опитване на алтернативни RTSP URL адреси...")
+            
+            # Вземаме данните за връзка, за да построим алтернативни URLs
+            from .config import rtsp_urls
+            
+            # Опитваме всеки URL
+            for url in rtsp_urls:
+                if url != config.rtsp_url:  # Пропускаме основния URL, който вече пробвахме
+                    success, frame = try_capture_with_url(url, timeout=10)
+                    if success:
+                        # Ако успеем, обновяваме конфигурацията с работещия URL
+                        logger.info(f"Намерен работещ RTSP URL: {url}")
+                        update_capture_config(rtsp_url=url)
+                        break
         
-        # Проверяваме дали потокът е отворен
-        if not cap.isOpened():
-            logger.error(f"Не може да се отвори RTSP потока: {config.rtsp_url}")
-            update_capture_config(status="error")
-            return False
-        
-        logger.info("RTSP потокът е отворен успешно")
-        
-        # Конфигурация за по-добра работа
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        
-        # Четем кадъра със 5-секунден таймаут
-        has_frame = False
-        start_time = time.time()
-        frame = None
-        
-        while not has_frame and time.time() - start_time < 5:
-            ret, frame = cap.read()
-            if ret and frame is not None:
-                has_frame = True
-                break
-            time.sleep(0.1)
-        
-        # Освобождаваме ресурсите
-        cap.release()
-        
-        if not has_frame or frame is None:
-            logger.error("Не може да се прочете кадър от RTSP потока")
+        # Ако не сме успели да получим кадър от нито един URL
+        if not success or frame is None:
+            logger.error("Не може да се прочете кадър от нито един RTSP поток")
             update_capture_config(status="error")
             return False
         
@@ -356,7 +407,25 @@ def initialize():
     Инициализира модула за заснемане
     """
     # Проверка на OpenCV инсталацията
-    verify_opencv_installation()
+    # verify_opencv_installation()
+    try:
+        logger.info(f"OpenCV версия: {cv2.__version__}")
+        
+        # Проверка на наличните бекенди
+        try:
+            backends = []
+            # В различни версии на OpenCV това е организирано различно
+            if hasattr(cv2, 'videoio_registry'):
+                for backend_id in cv2.videoio_registry.getBackends():
+                    backend_name = cv2.videoio_registry.getBackendName(backend_id)
+                    backends.append(f"{backend_name}")
+                logger.info(f"Налични бекенди: {backends}")
+            else:
+                logger.info("OpenCV videoio_registry не е наличен в тази версия")
+        except Exception as e:
+            logger.warning(f"Грешка при проверка на бекендите: {str(e)}")
+    except Exception as e:
+        logger.error(f"Грешка при проверка на OpenCV: {str(e)}")
 
     # Получаваме конфигурацията
     config = get_capture_config()
@@ -366,9 +435,27 @@ def initialize():
     is_hf_space = os.environ.get('SPACE_ID') is not None
     logger.info(f"Hugging Face Space: {is_hf_space}")
 
-    # Създаваме директорията за запазване на кадри ако не съществува
-    os.makedirs(config.save_dir, exist_ok=True)
-    os.makedirs("static", exist_ok=True)
+    # Тестваме директориите за запис
+    test_directories = [config.save_dir, "static", "/tmp"]
+    for directory in test_directories:
+        try:
+            os.makedirs(directory, exist_ok=True)
+            logger.info(f"Създадена директория: {directory}")
+            # Опитваме се да зададем права, но не е критично
+            try:
+                os.chmod(directory, 0o777)
+                logger.debug(f"Зададени права 777 за {directory}")
+            except Exception as e:
+                logger.debug(f"Не могат да се променят правата на {directory}: {e}")
+                
+            # Тестваме записа
+            test_file = os.path.join(directory, "test_write.txt")
+            with open(test_file, "w") as f:
+                f.write(f"Test write at {datetime.now()}")
+            os.remove(test_file)
+            logger.info(f"Успешен запис в директория {directory}")
+        except Exception as e:
+            logger.warning(f"Проблем с директория {directory}: {str(e)}")
     
     # Създаваме placeholder за latest.jpg
     latest_path = os.path.join(config.save_dir, "latest.jpg")
@@ -381,7 +468,7 @@ def initialize():
         cv2.putText(
             placeholder, 
             "Waiting for first frame...", 
-            (50, height // 2),
+            (50, height // 2 - 40),
             cv2.FONT_HERSHEY_SIMPLEX, 
             1, 
             (255, 255, 255), 
@@ -393,10 +480,22 @@ def initialize():
         cv2.putText(
             placeholder, 
             timestamp, 
-            (50, height // 2 + 40),
+            (50, height // 2),
             cv2.FONT_HERSHEY_SIMPLEX, 
             0.7, 
             (200, 200, 255), 
+            2
+        )
+        
+        # Добавяме инфо за камерата
+        camera_info = config.rtsp_url.split('@')[-1].split('/')[0]
+        cv2.putText(
+            placeholder, 
+            f"Camera: {camera_info}", 
+            (50, height // 2 + 40),
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            0.7, 
+            (200, 255, 200), 
             2
         )
 
@@ -412,7 +511,15 @@ def initialize():
             except Exception as e:
                 logger.warning(f"Не може да се запише placeholder в {path}: {str(e)}")
     
+    # Вземаме списъка с алтернативни URLs
+    try:
+        from .config import rtsp_urls
+        logger.info(f"Налични RTSP URLs за опитване: {len(rtsp_urls)}")
+    except Exception as e:
+        logger.warning(f"Грешка при достъп до алтернативни URLs: {str(e)}")
+    
     # Опитваме се да извлечем първия кадър
+    logger.info("Опит за извличане на първи кадър...")
     initial_result = capture_frame()
     logger.info(f"Резултат от първото извличане: {'успешно' if initial_result else 'неуспешно'}")
     
