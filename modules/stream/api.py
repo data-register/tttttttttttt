@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from .config import get_stream_config
+from .ffmpeg_utils import get_frame_from_public_stream, add_timestamp_to_frame, check_ffmpeg_installed
 from utils.logger import setup_logger
 
 # Инициализиране на логър
@@ -61,12 +62,41 @@ async def stream_info():
 
 @router.get("/snapshot")
 async def get_snapshot():
-    """Връща текущ кадър от RTSP потока като JPEG изображение"""
+    """Връща текущ кадър от видео потока като JPEG изображение"""
     logger.info("Заявка за snapshot изображение")
     
-    # Първо пробваме да създадем тестово изображение с текуща дата и час
+    # Първо проверяваме дали FFmpeg е достъпен
+    ffmpeg_available = check_ffmpeg_installed()
+    
+    if ffmpeg_available:
+        try:
+            # Опитваме да вземем кадър от публичния поток
+            logger.info("Извличане на кадър от публичния поток")
+            frame = get_frame_from_public_stream()
+            
+            if frame is not None:
+                # Добавяме текущата дата и час към кадъра
+                frame_with_timestamp = add_timestamp_to_frame(
+                    frame,
+                    position="bottom-right",
+                    text="PTZ Camera"
+                )
+                
+                # Преобразуваме в JPEG
+                _, jpeg = cv2.imencode(".jpg", frame_with_timestamp, [cv2.IMWRITE_JPEG_QUALITY, 90])
+                
+                logger.info("Успешно извличане на кадър от потока")
+                return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+            else:
+                logger.warning("Не може да се извлече кадър от потока")
+        except Exception as e:
+            logger.error(f"Грешка при извличане на кадър от потока: {str(e)}")
+    else:
+        logger.warning("FFmpeg не е наличен, използваме резервен метод")
+    
+    # Запасен вариант - генерираме тестово изображение
     try:
-        # Създаваме тестово изображение
+        # Създаваме информативно изображение
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         height, width = 480, 640
         
@@ -95,25 +125,25 @@ async def get_snapshot():
             2
         )
         
-        # Добавяме съобщение, че е демо изображение
+        # Добавяме съобщение за FFmpeg
         cv2.putText(
             image,
-            "Демо изображение от камерата",
+            f"FFmpeg статус: {'Наличен' if ffmpeg_available else 'Недостъпен'}",
             (50, height // 2 + 40),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
-            (200, 255, 200),
+            (200, 255, 200) if ffmpeg_available else (200, 100, 100),
             2
         )
         
         # Преобразуваме в JPEG
         _, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 90])
         
-        logger.info("Успешно генериране на демо изображение")
+        logger.info("Успешно генериране на резервно изображение")
         return Response(content=jpeg.tobytes(), media_type="image/jpeg")
         
     except Exception as e:
-        logger.error(f"Грешка при генериране на изображение: {str(e)}")
+        logger.error(f"Грешка при генериране на резервно изображение: {str(e)}")
         return create_error_image()
 
 def create_error_image(width=640, height=480):
