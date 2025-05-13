@@ -192,9 +192,28 @@ async def health():
 @app.get("/latest.jpg")
 async def latest_image_redirect():
     """Връща последното изображение от камерата"""
-    # Просто пренасочваме към capture модула, който вече е оптимизиран
-    # да търси и връща изображение от всички възможни локации
-    return RedirectResponse(url="/capture/latest.jpg")
+    try:
+        # Списък с възможни места, където може да е изображението
+        possible_paths = [
+            "static/latest.jpg",
+            os.path.join("frames", "latest.jpg")
+        ]
+
+        # Проверяваме в различните места
+        for path in possible_paths:
+            if os.path.exists(path):
+                file_size = os.path.getsize(path)
+                if file_size > 0:
+                    logger.info(f"Serving latest.jpg from {path}, size: {file_size} bytes")
+                    return FileResponse(path, media_type="image/jpeg")
+        
+        # Не намерихме съществуващо изображение, пренасочваме към capture модула,
+        # който ще се опита да направи нова снимка
+        return RedirectResponse(url="/capture/latest.jpg")
+    except Exception as e:
+        logger.error(f"Грешка при опит за достъп до latest.jpg: {str(e)}")
+        # Пренасочване към capture модула като последна опция
+        return RedirectResponse(url="/capture/latest.jpg")
 
 # Модулите за работа с дата и време са преместени в началото на файла
 

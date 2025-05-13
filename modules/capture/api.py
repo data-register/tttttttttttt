@@ -12,18 +12,6 @@ from .config import get_capture_config, update_capture_config
 from .capture import capture_frame, get_placeholder_image, start_capture_thread, stop_capture_thread
 from utils.logger import setup_logger
 
-# Импортираме тестовите функции
-try:
-    from .test_utils import create_test_image, test_write_locations, check_file_access
-except ImportError:
-    # Ако модулът не е наличен, създаваме dummy функции
-    def create_test_image(*args, **kwargs):
-        return None
-    def test_write_locations():
-        return {"error": "Test module not available"}
-    def check_file_access():
-        return {"error": "Test module not available"}
-
 # Инициализиране на логър
 logger = setup_logger("capture_api")
 
@@ -44,7 +32,6 @@ async def latest_jpg():
         possible_paths = [
             "static/latest.jpg",  # Първи приоритет - static директория
             os.path.join(config.save_dir, "latest.jpg"),  # Втори приоритет - frames директория
-            "/tmp/latest.jpg",  # Трети приоритет - tmp директория
         ]
         
         # Добавяме последния запазен кадър, ако имаме такъв
@@ -72,7 +59,7 @@ async def latest_jpg():
                 except Exception as e:
                     logger.warning(f"Грешка при проверка на {path}: {str(e)}")
         
-        # Ако не сме намерили кадър, опитваме да извлечем нов на момента
+        # Ако не сме намерили кадър, опитваме да заснемем нов
         logger.info("Не е намерен съществуващ кадър, извличане на нов кадър")
         capture_success = capture_frame()
         
@@ -114,6 +101,7 @@ async def capture_info():
         "last_frame_time": config.last_frame_time.isoformat() if config.last_frame_time else None,
         "last_frame_path": config.last_frame_path,
         "rtsp_url": config.rtsp_url,
+        "interval": config.interval,
         "width": config.width,
         "height": config.height,
         "quality": config.quality,
@@ -123,61 +111,51 @@ async def capture_info():
 @router.get("/capture_now")
 async def api_capture():
     """Принудително извличане на нов кадър"""
-    try:
-        logger.info("Започване на принудително извличане на кадър")
-        success = capture_frame()
-
-        if success:
-            config = get_capture_config()
-            logger.info("Успешно извличане на кадър")
-
-            # Проверка за наличие на файла
-            static_path = "static/latest.jpg"
-            if os.path.exists(static_path):
-                file_size = os.path.getsize(static_path)
-                logger.info(f"Файлът съществува, размер: {file_size} bytes")
-            else:
-                logger.warning("Файлът не съществува въпреки успешния capture")
-
-            # Връщане на информация за кадъра
-            return JSONResponse({
-                "status": "ok",
-                "message": "Кадърът е успешно извлечен",
-                "last_frame_time": config.last_frame_time.isoformat() if config.last_frame_time else None,
-                "latest_url": "/capture/latest.jpg",
-                "file_exists": os.path.exists(static_path),
-                "file_size": os.path.getsize(static_path) if os.path.exists(static_path) else 0
-            })
-        else:
-            logger.warning("Неуспешно извличане на кадър")
-            return JSONResponse({
-                "status": "error",
-                "message": "Не може да се извлече кадър от камерата",
-                "possible_reason": "Това може да е очаквано в Hugging Face Space поради ограничения в средата."
-            }, status_code=500)
-    except Exception as e:
-        logger.error(f"Грешка при извличане на кадър: {str(e)}")
-        import traceback
-        logger.error(f"Stack trace: {traceback.format_exc()}")
+    logger.info("Започване на принудително извличане на кадър")
+    success = capture_frame()
+    
+    if success:
+        config = get_capture_config()
+        logger.info("Успешно извличане на кадър")
+        
+        # Проверка за наличие на файла
+        static_path = "static/latest.jpg"
+        if os.path.exists(static_path):
+            file_size = os.path.getsize(static_path)
+            logger.info(f"Файлът съществува, размер: {file_size} bytes")
+        
+        # Връщане на информация за кадъра
+        return JSONResponse({
+            "status": "ok",
+            "message": "Кадърът е успешно извлечен",
+            "last_frame_time": config.last_frame_time.isoformat() if config.last_frame_time else None,
+            "latest_url": "/capture/latest.jpg",
+            "file_exists": os.path.exists(static_path),
+            "file_size": os.path.getsize(static_path) if os.path.exists(static_path) else 0
+        })
+    else:
+        logger.warning("Неуспешно извличане на кадър")
         return JSONResponse({
             "status": "error",
-            "message": f"Грешка при заснемане: {str(e)}",
-            "possible_reason": "Това може да е очаквано в Hugging Face Space поради ограничения в средата."
+            "message": "Не може да се извлече кадър от камерата"
         }, status_code=500)
 
 @router.post("/config")
 async def update_config(
     rtsp_url: str = Form(None),
+    interval: int = Form(None),
     width: int = Form(None),
     height: int = Form(None),
-    quality: int = Form(None),
-    interval: int = Form(None)
+    quality: int = Form(None)
 ):
     """Обновява конфигурацията на Capture модула"""
     update_params = {}
     
     if rtsp_url is not None:
         update_params["rtsp_url"] = rtsp_url
+    
+    if interval is not None:
+        update_params["interval"] = interval
     
     if width is not None:
         update_params["width"] = width
@@ -188,9 +166,6 @@ async def update_config(
     if quality is not None:
         update_params["quality"] = quality
     
-    if interval is not None:
-        update_params["interval"] = interval
-    
     # Обновяваме конфигурацията
     updated_config = update_capture_config(**update_params)
     
@@ -199,10 +174,10 @@ async def update_config(
         "message": "Конфигурацията е обновена успешно",
         "config": {
             "rtsp_url": updated_config.rtsp_url,
+            "interval": updated_config.interval,
             "width": updated_config.width,
             "height": updated_config.height,
-            "quality": updated_config.quality,
-            "interval": updated_config.interval
+            "quality": updated_config.quality
         }
     })
 
@@ -226,7 +201,7 @@ async def start_capture():
 async def stop_capture():
     """Спира процеса за извличане на кадри"""
     success = stop_capture_thread()
-
+    
     if success:
         return JSONResponse({
             "status": "ok",
@@ -236,90 +211,4 @@ async def stop_capture():
         return JSONResponse({
             "status": "error",
             "message": "Failed to stop capture thread"
-        }, status_code=500)
-
-@router.get("/diagnostics")
-async def diagnostics():
-    """Извършва диагностика на capture модула"""
-    try:
-        # Получаваме конфигурацията
-        config = get_capture_config()
-
-        # Правим тестове за достъп до файловата система
-        fs_access = check_file_access()
-
-        # Тестваме писане във всички възможни локации
-        write_tests = test_write_locations()
-
-        # Проверка за съществуващи файлове
-        files_check = {
-            "static/latest.jpg": {
-                "exists": os.path.exists("static/latest.jpg"),
-                "size": os.path.getsize("static/latest.jpg") if os.path.exists("static/latest.jpg") else 0
-            },
-            "frames/latest.jpg": {
-                "exists": os.path.exists("frames/latest.jpg"),
-                "size": os.path.getsize("frames/latest.jpg") if os.path.exists("frames/latest.jpg") else 0
-            },
-            "/tmp/latest.jpg": {
-                "exists": os.path.exists("/tmp/latest.jpg"),
-                "size": os.path.getsize("/tmp/latest.jpg") if os.path.exists("/tmp/latest.jpg") else 0
-            }
-        }
-
-        # Тестваме създаване на тестово изображение в static директорията
-        test_img_path = create_test_image(
-            text="Diagnostics Test",
-            save_path="static/test_image.jpg"
-        )
-
-        # Проверка за OpenCV инсталацията
-        try:
-            import cv2
-            cv_version = cv2.__version__
-            cv_status = "ok"
-        except Exception as cv_err:
-            cv_version = None
-            cv_status = f"error: {str(cv_err)}"
-
-        # Проверка за HF Space
-        is_hf_space = os.environ.get('SPACE_ID') is not None
-
-        # Връщаме резултатите от диагностиката
-        return JSONResponse({
-            "status": "ok",
-            "config": {
-                "rtsp_url": config.rtsp_url,
-                "width": config.width,
-                "height": config.height,
-                "quality": config.quality,
-                "interval": config.interval,
-                "save_dir": config.save_dir,
-                "current_status": config.status
-            },
-            "filesystem_access": fs_access,
-            "write_tests": write_tests,
-            "files_check": files_check,
-            "test_image": {
-                "path": test_img_path,
-                "exists": os.path.exists(test_img_path) if test_img_path else False,
-                "size": os.path.getsize(test_img_path) if test_img_path and os.path.exists(test_img_path) else 0
-            },
-            "opencv": {
-                "version": cv_version,
-                "status": cv_status
-            },
-            "environment": {
-                "is_hf_space": is_hf_space,
-                "space_id": os.environ.get('SPACE_ID'),
-                "timestamp": datetime.now().isoformat()
-            }
-        })
-    except Exception as e:
-        logger.error(f"Грешка при диагностика: {str(e)}")
-        import traceback
-        logger.error(f"Stack trace: {traceback.format_exc()}")
-        return JSONResponse({
-            "status": "error",
-            "message": f"Грешка при диагностика: {str(e)}"
         }, status_code=500)
