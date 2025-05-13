@@ -25,12 +25,12 @@ rtsp_pass = os.getenv("RTSP_PASS", "L20E0658")
 rtsp_host = os.getenv("RTSP_HOST", "109.160.23.42")
 rtsp_port = os.getenv("RTSP_PORT", "554")
 
-# За тази камера работи формат /ch01/0
-rtsp_path = "ch01/0"
+# Точен URL адрес, предоставен от клиента
+rtsp_url = "rtsp://109.160.23.42:554/cam/realmonitor?channel=1&subtype=0&unicast=true&proto=Onvif"
 
 # Глобална конфигурация на модула
 _config = CaptureConfig(
-    rtsp_url=os.getenv("RTSP_URL", f"rtsp://{rtsp_user}:{rtsp_pass}@{rtsp_host}:{rtsp_port}/{rtsp_path}"),
+    rtsp_url=os.getenv("RTSP_URL", rtsp_url),
     save_dir=os.getenv("SAVE_DIR", "frames"),
     interval=int(os.getenv("INTERVAL", "30")),
     width=int(os.getenv("WIDTH", "1280")),
