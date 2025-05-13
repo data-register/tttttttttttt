@@ -158,7 +158,7 @@ def capture_frame_from_stream(stream_url, output_path=None, timeout=15):
 
 def get_frame_from_public_stream(stream_url="rtsp://admin:admin@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0", force_refresh=False, max_cache_age=5):
     """
-    Извлича кадър от публичен видео поток с използване на кеш
+    Извлича кадър от публичен видео поток с използване на кеш - локална версия
     
     Args:
         stream_url (str): URL на видео потока
@@ -182,41 +182,50 @@ def get_frame_from_public_stream(stream_url="rtsp://admin:admin@109.160.23.42:55
         # Ако нямаме кеширан кадър, продължаваме с извличане на нов
         logger.info(f"Извличане на нов кадър от поток {stream_url}")
         
-        # Конфигурация за RTSP поток директно към камерата
-        rtsp_url = "rtsp://admin:admin@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0"
+        # Използваме директно подадения URL
+        rtsp_url = stream_url
         
-        # Използваме временен файл за запис на кадъра
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-            temp_path = temp_file.name
+        # Създаваме frames директория ако не съществува
+        frames_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frames")
+        os.makedirs(frames_dir, exist_ok=True)
         
-        # Изпълняваме FFmpeg команда специално оптимизирана за RTSP потоци
+        # Използваме постоянен път за последния кадър - за лесен преглед
+        latest_path = os.path.join(frames_dir, "latest.jpg")
+        
+        # Създаваме и нов кадър с timestamp - за архив
+        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp_path = os.path.join(frames_dir, f"frame_{timestamp_str}.jpg")
+        
+        # Директна FFmpeg команда за извличане на кадър - опростен вариант за локална работа
         cmd = [
             'ffmpeg',
-            '-y',  # Презапис без питане
-            '-loglevel', 'error',  # Само грешки в изхода
-            '-rtsp_transport', 'tcp',  # Използваме TCP за RTSP (по-надеждно)
-            '-i', rtsp_url,  # Вход - RTSP URL
-            '-frames:v', '1',  # Само един кадър
-            '-q:v', '1',  # Максимално качество
-            temp_path  # Път до изходния файл
+            '-y',                   # Презаписване без питане
+            '-rtsp_transport', 'tcp',  # По-надеждно за RTSP
+            '-i', rtsp_url,         # RTSP URL
+            '-frames:v', '1',       # Само един кадър
+            '-q:v', '1',            # Най-високо качество
+            latest_path             # Изходен файл
         ]
         
-        logger.info(f"Изпълнение на директна FFmpeg команда за RTSP: {' '.join(cmd)}")
+        logger.info(f"Изпълнение на FFmpeg команда локално: ffmpeg -rtsp_transport tcp -i {rtsp_url} -frames:v 1 -q:v 1 {latest_path}")
         
         try:
+            # Изпълняваме командата
             process = subprocess.run(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                timeout=10  # 10 секунди таймаут
+                timeout=15  # По-дълъг таймаут за локална среда
             )
             
-            if process.returncode == 0 and os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
-                # Успешно изтегляне
-                frame = cv2.imread(temp_path)
+            # Проверяваме резултата
+            if process.returncode == 0 and os.path.exists(latest_path) and os.path.getsize(latest_path) > 0:
+                # Копираме в архивния файл
+                import shutil
+                shutil.copy(latest_path, timestamp_path)
                 
-                # Изтриваме временния файл
-                os.unlink(temp_path)
+                # Зареждаме изображението
+                frame = cv2.imread(latest_path)
                 
                 if frame is not None:
                     # Добавяме timestamp
@@ -226,39 +235,52 @@ def get_frame_from_public_stream(stream_url="rtsp://admin:admin@109.160.23.42:55
                         text="Obzor PTZ Camera"
                     )
                     
+                    # Запазваме обратно с timestamp
+                    cv2.imwrite(latest_path, frame_with_timestamp)
+                    
                     # Запазваме в кеша
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     metadata = {
                         'source': rtsp_url,
-                        'timestamp': timestamp,
-                        'type': 'rtsp_capture'
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'type': 'rtsp_capture_local',
+                        'path': latest_path
                     }
                     
                     frame_cache.store_frame(frame_with_timestamp, cache_key, metadata=metadata, max_age=max_cache_age)
-                    logger.info(f"Успешно извлечен и кеширан кадър от RTSP: {rtsp_url}")
+                    logger.info(f"Успешно извлечен кадър от RTSP, записан в {latest_path} и {timestamp_path}")
                     
                     return frame_with_timestamp
+                else:
+                    logger.error(f"Не може да се зареди изображението от {latest_path}")
             else:
-                error_msg = process.stderr.decode('utf-8', errors='ignore')
-                logger.error(f"Грешка при FFmpeg RTSP извличане: {error_msg}")
-                
-        except Exception as e:
-            logger.error(f"Изключение при FFmpeg изпълнение: {str(e)}")
+                error_output = process.stderr.decode('utf-8', errors='ignore')
+                logger.error(f"FFmpeg грешка: {error_output}")
         
-        # Алтернативен подход - ако горният не успее, опитваме с обикновена CV2 видео capture
-        logger.info("Опитваме алтернативен метод с OpenCV VideoCapture")
+        except Exception as e:
+            logger.error(f"Грешка при изпълнение на FFmpeg: {str(e)}")
+        
+        # Алтернативен метод с OpenCV
+        logger.info("Опитваме с OpenCV VideoCapture")
         
         try:
+            # Настройваме параметрите за OpenCV
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+            
+            # Отваряме потока
             cap = cv2.VideoCapture(rtsp_url)
             
+            # Задаваме опция за намаляване на кеширането/буферирането
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
             if cap.isOpened():
-                # Изчакваме малко, за да може да се инициализира потока
-                time.sleep(1)
+                # Прочитаме първия кадър
+                for i in range(3):  # Опитваме няколко пъти за по-голяма сигурност
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        break
+                    time.sleep(0.5)
                 
-                # Прочитаме кадъра
-                ret, frame = cap.read()
-                
-                # Освобождаваме ресурсите
+                # Освобождаваме камерата веднага
                 cap.release()
                 
                 if ret and frame is not None:
@@ -266,40 +288,45 @@ def get_frame_from_public_stream(stream_url="rtsp://admin:admin@109.160.23.42:55
                     frame_with_timestamp = add_timestamp_to_frame(
                         frame,
                         position="bottom-right",
-                        text="Obzor PTZ Camera (OpenCV)"
+                        text="PTZ Camera (OpenCV)"
                     )
                     
+                    # Запазваме кадрите
+                    cv2.imwrite(latest_path, frame_with_timestamp)
+                    cv2.imwrite(timestamp_path, frame_with_timestamp)
+                    
                     # Запазваме в кеша
-                    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     metadata = {
                         'source': rtsp_url,
-                        'timestamp': timestamp,
-                        'type': 'opencv_capture'
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'type': 'opencv_capture_local',
+                        'path': latest_path
                     }
                     
                     frame_cache.store_frame(frame_with_timestamp, cache_key, metadata=metadata, max_age=max_cache_age)
-                    logger.info(f"Успешно извлечен и кеширан кадър чрез OpenCV от: {rtsp_url}")
+                    logger.info(f"Успешно извлечен кадър с OpenCV, записан в {latest_path}")
                     
                     return frame_with_timestamp
                 else:
-                    logger.error("OpenCV не успя да прочете кадър от потока")
+                    logger.error("OpenCV не успя да прочете кадър от RTSP потока")
             else:
-                logger.error(f"OpenCV не успя да отвори потока: {rtsp_url}")
-                
-        except Exception as e:
-            logger.error(f"Грешка при OpenCV capture: {str(e)}")
+                logger.error(f"OpenCV не успя да отвори RTSP потока: {rtsp_url}")
         
-        # Ако и двата метода не успеят, използваме публичния стрийм
-        logger.info("Опитваме да използваме публичния стрийм директно от HTML")
+        except Exception as e:
+            logger.error(f"Грешка при OpenCV обработка: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+        
+        # Ако и двата метода са неуспешни, генерираме демо изображение
+        logger.info("Генериране на демо изображение след неуспешни опити")
         
         try:
-            # За да извлечем кадър от HTML стрийма, трябва да използваме скрийншот на страницата
-            # Тъй като това не е възможно в този контекст, създаваме временен фалбек кадър
+            # Създаваме базово изображение
             height, width = 480, 640
             image = np.zeros((height, width, 3), dtype=np.uint8)
-            image[:, :, :] = (20, 40, 80)  # Темносиньо фон
+            image[:, :, :] = (30, 50, 70)  # Тъмно синьо-сив фон
             
-            # Добавяме текст с информация 
+            # Добавяме информация
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
             cv2.putText(
@@ -314,7 +341,7 @@ def get_frame_from_public_stream(stream_url="rtsp://admin:admin@109.160.23.42:55
             
             cv2.putText(
                 image,
-                f"Time: {timestamp}",
+                f"Време: {timestamp}",
                 (50, 150),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.6,
@@ -324,36 +351,55 @@ def get_frame_from_public_stream(stream_url="rtsp://admin:admin@109.160.23.42:55
             
             cv2.putText(
                 image,
-                "RTSP connection failed",
+                f"Камера: {rtsp_url}",
+                (50, 200),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (180, 180, 220),
+                1
+            )
+            
+            cv2.putText(
+                image,
+                "ГРЕШКА: Не може да се установи връзка с камерата",
                 (50, 250),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                (100, 100, 255),
+                0.6,
+                (50, 50, 255),
                 2
             )
             
             cv2.putText(
                 image,
-                "Please use Live tab to view stream",
-                (50, 370),
+                "Проверете RTSP URL и мрежовата свързаност",
+                (50, 300),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (255, 200, 200),
+                0.5,
+                (100, 200, 200),
                 1
             )
             
+            # Добавяме рамка
+            cv2.rectangle(image, (20, 20), (width-20, height-20), (100, 100, 180), 2)
+            
+            # Запазваме изображението
+            cv2.imwrite(latest_path, image)
+            
             # Запазваме в кеша
             metadata = {
-                'source': "fallback",
+                'source': rtsp_url,
                 'timestamp': timestamp,
-                'type': 'fallback'
+                'type': 'error_fallback',
+                'path': latest_path
             }
             
             frame_cache.store_frame(image, cache_key, metadata=metadata, max_age=max_cache_age)
+            logger.info(f"Генерирано заместващо изображение и записано в {latest_path}")
+            
             return image
                 
         except Exception as e:
-            logger.error(f"Грешка при генериране на резервен кадър: {str(e)}")
+            logger.error(f"Грешка при генериране на заместващо изображение: {str(e)}")
             return None
             
     except Exception as e:

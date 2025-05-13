@@ -62,39 +62,53 @@ async def stream_info():
     })
 
 @router.get("/snapshot")
-async def get_snapshot(force_refresh: bool = Query(False, description="Задължително обновяване на кадъра")):
-    """Връща текущ кадър от видео потока като JPEG изображение с поддръжка на кеш"""
-    logger.info(f"Заявка за snapshot изображение (force_refresh={force_refresh})")
+async def get_snapshot(force_refresh: bool = Query(False, description="Задължително обновяване на кадъра"),
+                     rtsp_url: str = Query(None, description="Алтернативен RTSP URL (опционален)")):
+    """Връща текущ кадър от видео потока като JPEG изображение с поддръжка на кеш - локална версия"""
+    logger.info(f"Заявка за snapshot изображение (force_refresh={force_refresh}, rtsp_url={rtsp_url})")
     
-    # Първо проверяваме дали FFmpeg е достъпен
+    # Проверяваме дали FFmpeg е наличен в системата
     ffmpeg_available = check_ffmpeg_installed()
     
-    if ffmpeg_available:
-        try:
-            # Опитваме да вземем кадър от публичния поток с кеш механизъм
-            # По подразбиране кешът е валиден 5 секунди
-            logger.info("Извличане на кадър от публичния поток")
-            frame = get_frame_from_public_stream(force_refresh=force_refresh, max_cache_age=5)
+    if not ffmpeg_available:
+        logger.warning("FFmpeg не е инсталиран локално. Инсталирайте с: apt-get install ffmpeg")
+    
+    # Определяме URL на потока (използваме подадения или стандартния)
+    stream_url = rtsp_url if rtsp_url else "rtsp://admin:admin@109.160.23.42:554/cam/realmonitor?channel=1&subtype=0"
+    
+    try:
+        # Проверяваме за наличен latest.jpg файл, който се използва за локален достъп
+        frames_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "frames")
+        latest_path = os.path.join(frames_dir, "latest.jpg")
+        
+        # Ако force_refresh е True или файлът не съществува, извличаме нов кадър
+        if force_refresh or not os.path.exists(latest_path):
+            logger.info(f"Извличане на нов кадър от {stream_url}")
+            
+            # Използваме локалната версия на функцията
+            frame = get_frame_from_public_stream(stream_url=stream_url, force_refresh=True, max_cache_age=5)
             
             if frame is not None:
-                # Добавяме текущата дата и час към кадъра
-                frame_with_timestamp = add_timestamp_to_frame(
-                    frame,
-                    position="bottom-right",
-                    text="PTZ Camera"
-                )
-                
                 # Преобразуваме в JPEG
-                _, jpeg = cv2.imencode(".jpg", frame_with_timestamp, [cv2.IMWRITE_JPEG_QUALITY, 90])
-                
-                logger.info("Успешно извличане на кадър от потока")
+                _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                logger.info("Успешно извличане на кадър от RTSP потока")
                 return Response(content=jpeg.tobytes(), media_type="image/jpeg")
             else:
-                logger.warning("Не може да се извлече кадър от потока")
-        except Exception as e:
-            logger.error(f"Грешка при извличане на кадър от потока: {str(e)}")
-    else:
-        logger.warning("FFmpeg не е наличен, използваме резервен метод")
+                logger.warning("Не може да се извлече нов кадър от RTSP потока")
+        else:
+            # Проверяваме дали latest.jpg съществува и е валиден
+            if os.path.exists(latest_path) and os.path.getsize(latest_path) > 0:
+                # Прочитаме готовия файл (по-бързо от да го генерираме отново)
+                with open(latest_path, 'rb') as f:
+                    content = f.read()
+                    
+                logger.info(f"Използване на съществуващ кадър от {latest_path}")
+                return Response(content=content, media_type="image/jpeg")
+    
+    except Exception as e:
+        logger.error(f"Грешка при обработка на кадър: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
     
     # Запасен вариант - генерираме тестово изображение
     try:
