@@ -140,12 +140,14 @@
             
             <div class="controls">
                 <button class="button" id="refreshButton">Обнови кадъра</button>
+                <button class="button" id="forceRefreshButton">Принудително обновяване</button>
             </div>
             
             <div class="info">
                 <h3>Статичен кадър</h3>
                 <p>Тук можете да видите най-новия кадър от камерата.</p>
-                <p>Използвайте бутона "Обнови кадъра" за да заредите нов кадър.</p>
+                <p>Използвайте бутона "Обнови кадъра" за да заредите нов кадър (може да е кеширан).</p>
+                <p>Използвайте "Принудително обновяване" за да заредите нов кадър директно от камерата (без кеш).</p>
             </div>
             
             <div class="info">
@@ -162,6 +164,7 @@
             const tabs = document.querySelectorAll('.tab');
             const tabContents = document.querySelectorAll('.tab-content');
             const refreshButton = document.getElementById('refreshButton');
+            const forceRefreshButton = document.getElementById('forceRefreshButton');
             const snapshotImage = document.getElementById('snapshotImage');
             
             // Табове
@@ -175,23 +178,45 @@
                     this.classList.add('active');
                     const tabId = this.getAttribute('data-tab');
                     document.getElementById(tabId + '-tab').classList.add('active');
+                    
+                    // Ако сме на tab snapshot, опресняваме изображението
+                    if (tabId === 'snapshot') {
+                        refreshSnapshot();
+                    }
                 });
             });
             
-            // Функция за зареждане на нов кадър
+            // Стандартно обновяване на кадър (може да използва кеш)
             function refreshSnapshot() {
-                // Добавяме timestamp към URL за избягване на кеширане
+                // Добавяме timestamp към URL за избягване на кеширане на браузъра
                 const timestamp = new Date().getTime();
                 snapshotImage.src = '/stream/snapshot?' + timestamp;
             }
             
-            // Слушател за бутона
+            // Принудително обновяване (игнорира кеша)
+            function forceRefreshSnapshot() {
+                const timestamp = new Date().getTime();
+                snapshotImage.src = '/stream/snapshot?force_refresh=true&' + timestamp;
+            }
+            
+            // Слушатели за бутоните
             refreshButton.addEventListener('click', refreshSnapshot);
+            forceRefreshButton.addEventListener('click', forceRefreshSnapshot);
             
             // Автоматично зареждане на кадър, ако сме на този таб
             if (document.getElementById('snapshot-tab').classList.contains('active')) {
                 refreshSnapshot();
             }
+            
+            // Показваме състоянието на кеша при зареждане
+            fetch('/stream/cache')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Кеш статус:', data);
+                })
+                .catch(error => {
+                    console.error('Грешка при получаване на статус на кеша:', error);
+                });
         });
     </script>
 </body>

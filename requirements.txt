@@ -11,5 +11,9 @@ requests
 python-dotenv
 onvif-zeep==0.2.12
 
+# Python пакети за работа с FFmpeg
+python-ffmpeg==1.0.16
+ffmpeg-python==0.2.0
+
 # FFmpeg е опционален, но се препоръчва за по-надеждно приложение
 # Инсталира се с apt: sudo apt-get install -y ffmpeg

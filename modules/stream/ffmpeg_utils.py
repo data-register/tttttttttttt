@@ -12,6 +12,7 @@ import numpy as np
 from pathlib import Path
 
 from utils.logger import setup_logger
+from .cache import frame_cache
 
 # Инициализиране на логър
 logger = setup_logger("ffmpeg_utils")
@@ -109,17 +110,32 @@ def capture_frame_from_stream(stream_url, output_path=None, timeout=15):
         logger.error(f"Stack trace: {traceback.format_exc()}")
         return False, None, str(e)
 
-def get_frame_from_public_stream(stream_url="https://restream.obzorweather.com/cd84ff9e-9424-415b-8356-f47d0f214f8b.html"):
+def get_frame_from_public_stream(stream_url="https://restream.obzorweather.com/cd84ff9e-9424-415b-8356-f47d0f214f8b.html", force_refresh=False, max_cache_age=5):
     """
-    Извлича кадър от публичен видео поток
+    Извлича кадър от публичен видео поток с използване на кеш
     
     Args:
         stream_url (str): URL на видео потока
+        force_refresh (bool): Задължително обновяване на кадъра, независимо от кеша
+        max_cache_age (int): Максимална възраст на кеширания кадър в секунди
         
     Returns:
         numpy.ndarray или None: Кадър като изображение или None при грешка
     """
     try:
+        # Генерираме уникален ключ за този поток в кеша
+        cache_key = f"stream_{stream_url}"
+        
+        # Проверяваме за валиден кадър в кеша, освен ако не е поискано обновяване
+        if not force_refresh:
+            cached_frame, metadata = frame_cache.get_frame(cache_key, max_age=max_cache_age)
+            if cached_frame is not None:
+                logger.debug(f"Използване на кеширан кадър за {stream_url}, възраст: {metadata.get('age', 'unknown')}")
+                return cached_frame
+        
+        # Ако нямаме кеширан кадър, продължаваме с извличане на нов
+        logger.info(f"Извличане на нов кадър от поток {stream_url}")
+        
         # Първо проверяваме дали FFmpeg е наличен
         if not check_ffmpeg_installed():
             logger.error("FFmpeg не е инсталиран - не можем да извлечем кадър")
@@ -137,11 +153,13 @@ def get_frame_from_public_stream(stream_url="https://restream.obzorweather.com/c
             temp_path = temp_file.name
         
         # Извличаме кадър от потока
+        start_time = time.time()
         success, frame_path, error = capture_frame_from_stream(
             direct_stream_url, 
             output_path=temp_path,
             timeout=10
         )
+        capture_time = time.time() - start_time
         
         if not success:
             logger.error(f"Не успяхме да извлечем кадър: {error}")
@@ -158,6 +176,16 @@ def get_frame_from_public_stream(stream_url="https://restream.obzorweather.com/c
         if frame is None:
             logger.error("Файлът е създаден, но не може да се прочете като изображение")
             return None
+        
+        # Съхраняваме кадъра в кеша с метаданни
+        metadata = {
+            'capture_time': f"{capture_time:.2f}s",
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'source': stream_url,
+            'resolution': f"{frame.shape[1]}x{frame.shape[0]}"
+        }
+        frame_cache.store_frame(frame, cache_key, metadata=metadata, max_age=max_cache_age)
+        logger.info(f"Кадърът е съхранен в кеша с ключ {cache_key}")
             
         return frame
     

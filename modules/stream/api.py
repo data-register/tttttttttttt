@@ -7,12 +7,13 @@ import cv2
 import time
 import numpy as np
 from datetime import datetime
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Query
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from .config import get_stream_config
 from .ffmpeg_utils import get_frame_from_public_stream, add_timestamp_to_frame, check_ffmpeg_installed
+from .cache import frame_cache
 from utils.logger import setup_logger
 
 # Инициализиране на логър
@@ -61,18 +62,19 @@ async def stream_info():
     })
 
 @router.get("/snapshot")
-async def get_snapshot():
-    """Връща текущ кадър от видео потока като JPEG изображение"""
-    logger.info("Заявка за snapshot изображение")
+async def get_snapshot(force_refresh: bool = Query(False, description="Задължително обновяване на кадъра")):
+    """Връща текущ кадър от видео потока като JPEG изображение с поддръжка на кеш"""
+    logger.info(f"Заявка за snapshot изображение (force_refresh={force_refresh})")
     
     # Първо проверяваме дали FFmpeg е достъпен
     ffmpeg_available = check_ffmpeg_installed()
     
     if ffmpeg_available:
         try:
-            # Опитваме да вземем кадър от публичния поток
+            # Опитваме да вземем кадър от публичния поток с кеш механизъм
+            # По подразбиране кешът е валиден 5 секунди
             logger.info("Извличане на кадър от публичния поток")
-            frame = get_frame_from_public_stream()
+            frame = get_frame_from_public_stream(force_refresh=force_refresh, max_cache_age=5)
             
             if frame is not None:
                 # Добавяме текущата дата и час към кадъра
@@ -177,3 +179,36 @@ def create_error_image(width=640, height=480):
     _, jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 90])
     
     return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+
+@router.get("/cache")
+async def get_cache_status():
+    """
+    Връща информация за състоянието на кеша за кадри
+    """
+    # Вземаме информация от кеш механизма
+    cache_status = frame_cache.get_cache_status()
+    
+    # Добавяме информация за FFmpeg
+    cache_status["ffmpeg_available"] = check_ffmpeg_installed()
+    
+    return JSONResponse({
+        "status": "ok",
+        "cache": cache_status,
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
+
+@router.post("/cache/clear")
+async def clear_cache(source_id: str = None):
+    """
+    Изчиства кеша за кадри
+    
+    Args:
+        source_id: Идентификатор на източника (опционален, ако не е зададен, изчиства целия кеш)
+    """
+    frame_cache.clear_cache(source_id)
+    
+    return JSONResponse({
+        "status": "ok",
+        "message": f"Кешът {'за ' + source_id if source_id else 'изцяло'} е изчистен успешно",
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    })
