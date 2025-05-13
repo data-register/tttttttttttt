@@ -19,6 +19,10 @@ from utils.logger import setup_logger
 # Инициализиране на логър
 logger = setup_logger("capture")
 
+# Задаваме по-високо ниво на логване за debug в Hugging Face
+import logging
+logger.setLevel(logging.DEBUG)
+
 def capture_frame_ffmpeg() -> bool:
     """Извлича един кадър от RTSP потока използвайки FFmpeg директно"""
     config = get_capture_config()
@@ -160,8 +164,11 @@ def capture_frame_ffmpeg() -> bool:
             os.unlink(output_path)
         return False
 
-# Използваме FFmpeg метода като основен
+# Задаваме функцията за прихващане на кадри да използва FFmpeg
 capture_frame = capture_frame_ffmpeg
+
+# Добавяме изрично логване
+logger.info("Зададена основна функция за прихващане на кадри: FFmpeg подход")
 
 def get_placeholder_image() -> bytes:
     """Създава placeholder изображение, когато няма наличен кадър"""
