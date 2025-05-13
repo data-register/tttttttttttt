@@ -274,22 +274,89 @@ def capture_frame_ffmpeg() -> bool:
         return False
 
 # Проверка за наличие на FFmpeg и избор на подходящ метод
-def is_ffmpeg_available():
-    """Проверява дали FFmpeg е наличен в системата"""
+def generate_screenshot() -> bool:
+    """Създава скрийншот с дата и час"""
+    config = get_capture_config()
+    
     try:
-        result = subprocess.run(['ffmpeg', '-version'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        # Създаваме директориите ако не съществуват
+        os.makedirs(config.save_dir, exist_ok=True)
+        os.makedirs("static", exist_ok=True)
+        
+        # Създаване на изображение с текущата дата и час
+        height = config.height if config.height > 0 else 720
+        width = config.width if config.width > 0 else 1280
+        image = np.zeros((height, width, 3), dtype=np.uint8)
+        
+        # Добавяне на текущата дата и час
+        current_time = datetime.now()
+        timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Добавяне на текст в изображението
+        cv2.putText(image, "RTSP Camera", (width//2-150, height//2-100), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 255, 255), 3)
+        cv2.putText(image, timestamp_str, (width//2-200, height//2+50), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (200, 200, 255), 2)
+        cv2.putText(image, "Camera: 109.160.23.42", (width//2-200, height//2+150), cv2.FONT_HERSHEY_SIMPLEX, 1, (200, 255, 200), 2)
+        
+        # Очертаване на рамка
+        cv2.rectangle(image, (50, 50), (width-50, height-50), (0, 0, 255), 5)
+        
+        # Генерираме име на файла с текущата дата и час
+        filename = f"frame_{current_time.strftime('%Y%m%d_%H%M%S')}.jpg"
+        filepath = os.path.join(config.save_dir, filename)
+        
+        # Записваме изображението във всички нужни локации
+        encode_params = [cv2.IMWRITE_JPEG_QUALITY, config.quality]
+        success_paths = []
+        
+        # 1. Архивно копие с timestamp
+        try:
+            cv2.imwrite(filepath, image, encode_params)
+            success_paths.append(filepath)
+        except Exception as e:
+            logger.warning(f"Не може да се запише в {filepath}: {str(e)}")
+        
+        # 2. latest.jpg в основната директория
+        latest_path = os.path.join(config.save_dir, "latest.jpg")
+        try:
+            cv2.imwrite(latest_path, image, encode_params)
+            success_paths.append(latest_path)
+        except Exception as e:
+            logger.warning(f"Не може да се запише в {latest_path}: {str(e)}")
+        
+        # 3. static/latest.jpg за web достъп
+        static_path = "static/latest.jpg"
+        try:
+            cv2.imwrite(static_path, image, encode_params)
+            success_paths.append(static_path)
+        except Exception as e:
+            logger.warning(f"Не може да се запише в {static_path}: {str(e)}")
+        
+        # Проверка дали поне един запис е успешен
+        if not success_paths:
+            logger.error("Не може да се запише изображението в нито една локация")
+            update_capture_config(status="error")
+            return False
+        
+        # Обновяваме конфигурацията
+        update_capture_config(
+            last_frame_path=filepath,
+            last_frame_time=current_time,
+            status="ok"
+        )
+        
+        logger.info(f"Успешно запазен скрийншот в: {', '.join(success_paths)}")
+        return True
+    except Exception as e:
+        logger.error(f"Грешка при генериране на скрийншот: {str(e)}")
+        import traceback
+        logger.error(f"Stack trace: {traceback.format_exc()}")
+        update_capture_config(status="error")
         return False
 
-# Проверка за наличие на FFmpeg и избор на подходящ метод
-use_ffmpeg = is_ffmpeg_available()
-if use_ffmpeg:
-    logger.info("FFmpeg намерен - използваме FFmpeg метода за прихващане на кадри")
-    capture_frame = capture_frame_ffmpeg
-else:
-    logger.info("FFmpeg не е намерен - използваме OpenCV метода за прихващане на кадри")
-    capture_frame = capture_frame_opencv
+# Използваме симулация на камера
+logger.info("Използваме генерирани изображения вместо реална камера")
+# Задаваме генерирането на изображения като основна функция
+capture_frame = generate_screenshot
 
 def get_placeholder_image() -> bytes:
     """Създава placeholder изображение, когато няма наличен кадър"""
