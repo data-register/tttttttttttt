@@ -19,139 +19,153 @@ logger = setup_logger("capture")
 
 
 def capture_frame() -> bool:
-    """
-    Заснема кадър от RTSP потока и го записва на диск
-
-    Returns:
-        bool: True ако операцията е успешна, False в противен случай
-    """
+    """Извлича един кадър от RTSP потока и го записва като JPEG файл"""
+    config = get_capture_config()
+    
     try:
-        config = get_capture_config()
+        logger.info(f"Опит за свързване с RTSP поток: {config.rtsp_url}")
         
-        # Създаваме директориите, ако не съществуват
+        # Създаваме VideoCapture обект директно с FFMPEG backend
+        cap = cv2.VideoCapture(config.rtsp_url, cv2.CAP_FFMPEG)
+        
+        # Проверяваме дали потокът е отворен
+        if not cap.isOpened():
+            logger.error(f"Не може да се отвори RTSP потока: {config.rtsp_url}")
+            update_capture_config(status="error")
+            return False
+        
+        logger.info("RTSP потокът е отворен успешно")
+        
+        # Конфигурация за по-добра работа
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
+        # Четем кадъра със 5-секунден таймаут
+        has_frame = False
+        start_time = time.time()
+        frame = None
+        
+        while not has_frame and time.time() - start_time < 5:
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                has_frame = True
+                break
+            time.sleep(0.1)
+        
+        # Освобождаваме ресурсите
+        cap.release()
+        
+        if not has_frame or frame is None:
+            logger.error("Не може да се прочете кадър от RTSP потока")
+            update_capture_config(status="error")
+            return False
+        
+        # Преоразмеряваме кадъра, ако е нужно
+        if config.width > 0 and config.height > 0:
+            frame = cv2.resize(frame, (config.width, config.height))
+        
+        # Генерираме име на файла с текущата дата и час
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"frame_{timestamp}.jpg"
+        filepath = os.path.join(config.save_dir, filename)
+        
+        # Създаваме всички нужни директории
         os.makedirs(config.save_dir, exist_ok=True)
         os.makedirs("static", exist_ok=True)
         
-        # Генерираме имена на файлове
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filepath = os.path.join(config.save_dir, f"frame_{timestamp}.jpg")
-        latest_path = "static/latest.jpg"
+        # Записваме кадъра като JPEG файл
+        encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
         
-        # Максимално опростен метод за отваряне на RTSP потока
+        # Записваме файловете в различни локации за по-голяма надеждност
+        success_paths = []
+        error_paths = []
+        
+        # Най-важна локация: static директорията
+        static_path = "static/latest.jpg"
         try:
-            # В прост режим използваме стандартния начин
-            cap = cv2.VideoCapture(config.rtsp_url)
-            
-            # Проверучваме дали сме отворили потока
-            if not cap.isOpened():
-                # Един опит с FFMPEG бекенда
-                cap = cv2.VideoCapture(config.rtsp_url, cv2.CAP_FFMPEG)
-                if not cap.isOpened():
-                    # Ако и това не работи, създаваме празно изображение
-                    height = config.height if config.height > 0 else 480
-                    width = config.width if config.width > 0 else 640
-                    frame = np.zeros((height, width, 3), dtype=np.uint8)
-                    cv2.putText(
-                        frame,
-                        "No camera connection",
-                        (50, height // 2),
-                        cv2.FONT_HERSHEY_SIMPLEX, 
-                        1, 
-                        (255, 255, 255), 
-                        2
-                    )
-                    
-                    # Записваме празното изображение
-                    encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
-                    cv2.imwrite(latest_path, frame, encode_params)
-                    update_capture_config(status="error")
-                    return False
-            
-            # Прочитаме един кадър
-            ret, frame = cap.read()
-            
-            # Освобождаваме камерата
-            cap.release()
-            
-            # Проверка дали имаме успешен кадър
-            if not ret or frame is None:
-                # При грешка създаваме празно изображение
-                height = config.height if config.height > 0 else 480
-                width = config.width if config.width > 0 else 640
-                frame = np.zeros((height, width, 3), dtype=np.uint8)
-                cv2.putText(
-                    frame,
-                    "No frame available",
-                    (50, height // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    1, 
-                    (255, 255, 255), 
-                    2
-                )
-                
-                # Записваме празното изображение
-                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
-                cv2.imwrite(latest_path, frame, encode_params)
-                update_capture_config(status="error")
-                return False
-                
-            # Преоразмеряваме кадъра ако е нужно
-            if config.width > 0 and config.height > 0:
-                frame = cv2.resize(frame, (config.width, config.height))
-                
-            # Записваме кадъра
-            encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
-            
-            # Първо в static директорията (най-важно)
-            cv2.imwrite(latest_path, frame, encode_params)
-            
-            # После във фрейм директорията
-            try:
-                cv2.imwrite(filepath, frame, encode_params)
-            except Exception as e:
-                logger.warning(f"Не може да се запише в {filepath}, но latest.jpg е записан: {str(e)}")
-                # Продължаваме, тъй като най-важното е latest.jpg
-            
-            # Обновяваме конфигурацията
-            update_capture_config(
-                status="ok",
-                last_frame_time=datetime.now(),
-                last_frame_path=filepath
-            )
-            
-            return True
-            
+            cv2.imwrite(static_path, frame, encode_params)
+            success_paths.append(static_path)
         except Exception as e:
-            logger.error(f"Грешка при заснемане на кадър: {str(e)}")
+            logger.warning(f"Не може да се запише в {static_path}: {str(e)}")
+            error_paths.append((static_path, str(e)))
             
-            # Създаваме празно изображение при грешка
-            try:
-                height = config.height if config.height > 0 else 480
-                width = config.width if config.width > 0 else 640
-                frame = np.zeros((height, width, 3), dtype=np.uint8)
-                cv2.putText(
-                    frame,
-                    f"Error: {str(e)[:30]}",
-                    (50, height // 2),
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    0.7, 
-                    (255, 255, 255), 
-                    2
-                )
-                
-                # Записваме празното изображение
-                encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
-                cv2.imwrite(latest_path, frame, encode_params)
-            except Exception as inner_err:
-                logger.error(f"Не може да се създаде дори празно изображение: {str(inner_err)}")
-                
+        # Записваме архивно копие с timestamp
+        try:
+            cv2.imwrite(filepath, frame, encode_params)
+            success_paths.append(filepath)
+        except Exception as e:
+            logger.warning(f"Не може да се запише в {filepath}: {str(e)}")
+            error_paths.append((filepath, str(e)))
+        
+        # Записваме latest.jpg в frames директорията
+        frames_latest_path = os.path.join(config.save_dir, "latest.jpg")
+        try:
+            cv2.imwrite(frames_latest_path, frame, encode_params)
+            success_paths.append(frames_latest_path)
+        except Exception as e:
+            logger.warning(f"Не може да се запише в {frames_latest_path}: {str(e)}")
+            error_paths.append((frames_latest_path, str(e)))
+        
+        # Опитваме да запишем и в /tmp директорията за допълнителна сигурност
+        tmp_path = "/tmp/latest.jpg"
+        try:
+            cv2.imwrite(tmp_path, frame, encode_params)
+            success_paths.append(tmp_path)
+        except Exception as e:
+            logger.debug(f"Не може да се запише в {tmp_path}: {str(e)}")
+            error_paths.append((tmp_path, str(e)))
+        
+        # Проверяваме дали имаме поне един успешен запис
+        if not success_paths:
+            logger.error("Не може да се запише кадърът на нито една локация!")
+            for path, error in error_paths:
+                logger.error(f"Грешка за {path}: {error}")
             update_capture_config(status="error")
             return False
-            
+        
+        # Обновяваме конфигурацията
+        update_capture_config(
+            last_frame_path=filepath,
+            last_frame_time=datetime.now(),
+            status="ok"
+        )
+        
+        logger.info(f"Успешно запазен кадър в: {', '.join(success_paths)}")
+        return True
+        
     except Exception as e:
-        logger.error(f"Грешка при заснемане на кадър: {str(e)}")
+        logger.error(f"Грешка при извличане на кадър: {str(e)}")
         import traceback
         logger.error(f"Стек на грешката: {traceback.format_exc()}")
+
+        # Създаваме placeholder изображение
+        try:
+            height = config.height if config.height > 0 else 480
+            width = config.width if config.width > 0 else 640
+
+            frame = np.zeros((height, width, 3), dtype=np.uint8)
+            cv2.putText(
+                frame,
+                f"Error: {str(e)[:30]}",
+                (50, height // 2),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (255, 255, 255),
+                2
+            )
+
+            # Опитваме да запишем placeholder изображение във всички възможни локации
+            encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
+            locations = ["static/latest.jpg", os.path.join(config.save_dir, "latest.jpg"), "/tmp/latest.jpg"]
+            for path in locations:
+                try:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    cv2.imwrite(path, frame, encode_params)
+                    logger.info(f"Записан placeholder в {path}")
+                except Exception as inner_err:
+                    logger.debug(f"Не може да се запише placeholder в {path}: {str(inner_err)}")
+        except Exception as inner_err:
+            logger.error(f"Не може да се създаде дори празно изображение: {str(inner_err)}")
+
         update_capture_config(status="error")
         return False
 
@@ -269,6 +283,18 @@ def get_placeholder_image() -> bytes:
         2
     )
     
+    # Добавяме текущия час
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cv2.putText(
+        placeholder, 
+        timestamp, 
+        (50, height // 2 + 40),
+        cv2.FONT_HERSHEY_SIMPLEX, 
+        0.7, 
+        (200, 200, 255), 
+        2
+    )
+    
     # Конвертиране към bytes
     is_success, buffer = cv2.imencode(".jpg", placeholder)
     if is_success:
@@ -279,29 +305,20 @@ def get_placeholder_image() -> bytes:
 
 
 def capture_loop():
-    """
-    Фонов цикъл за периодично заснемане на кадри
-    """
-    while True:
+    """Основен цикъл за периодично извличане на кадри"""
+    config = get_capture_config()
+    
+    while config.running:
         try:
-            config = get_capture_config()
-            
-            if not config.running:
-                logger.info("Capture loop спрян")
-                break
-            
-            # Заснемаме кадър, ако интервалът е положителен
-            if config.interval > 0:  # Проверка за валиден интервал
-                result = capture_frame()
-                status = "успешно" if result else "неуспешно"
-                logger.info(f"Периодично заснемане: {status}")
-            
-            # Изчакваме до следващото заснемане
-            time.sleep(config.interval)
-            
+            capture_frame()
         except Exception as e:
-            logger.error(f"Грешка в capture_loop: {str(e)}")
-            time.sleep(10)  # Изчакваме при грешка
+            logger.error(f"Неочаквана грешка в capture_loop: {str(e)}")
+        
+        # Обновяваме конфигурацията (за случай, че е променена)
+        config = get_capture_config()
+        
+        # Спим до следващото извличане
+        time.sleep(config.interval)
 
 
 # Глобална променлива за capture thread
@@ -349,121 +366,57 @@ def initialize():
     is_hf_space = os.environ.get('SPACE_ID') is not None
     logger.info(f"Hugging Face Space: {is_hf_space}")
 
-    # Директории за създаване
-    directories = [
-        config.save_dir,
-        "static",
-        "/tmp",
-        "/tmp/frames"
-    ]
+    # Създаваме директорията за запазване на кадри ако не съществува
+    os.makedirs(config.save_dir, exist_ok=True)
+    os.makedirs("static", exist_ok=True)
+    
+    # Създаваме placeholder за latest.jpg
+    latest_path = os.path.join(config.save_dir, "latest.jpg")
+    if not os.path.exists(latest_path) or not os.path.exists("static/latest.jpg"):
+        height = config.height if config.height > 0 else 480
+        width = config.width if config.width > 0 else 640
+        placeholder = np.zeros((height, width, 3), dtype=np.uint8)
 
-    # Създаваме всички необходими директории
-    for directory in directories:
-        try:
-            os.makedirs(directory, exist_ok=True)
+        # Добавяме текст за инициализация
+        cv2.putText(
+            placeholder, 
+            "Waiting for first frame...", 
+            (50, height // 2),
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            1, 
+            (255, 255, 255), 
+            2
+        )
+        
+        # Добавяме текуща дата и час
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cv2.putText(
+            placeholder, 
+            timestamp, 
+            (50, height // 2 + 40),
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            0.7, 
+            (200, 200, 255), 
+            2
+        )
+
+        # Записваме placeholder изображение в различни локации
+        encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), config.quality]
+        locations = ["static/latest.jpg", latest_path, "/tmp/latest.jpg"]
+        
+        for path in locations:
             try:
-                os.chmod(directory, 0o777)
-                logger.info(f"Създадена директория {directory} с права 777")
-            except Exception as chmod_err:
-                logger.warning(f"Не могат да се зададат права за {directory}: {str(chmod_err)}")
-        except Exception as mkdir_err:
-            logger.error(f"Грешка при създаване на {directory}: {str(mkdir_err)}")
-
-    # Проверка за достъп до директориите
-    for directory in directories:
-        try:
-            test_file = os.path.join(directory, "test_write.txt")
-            with open(test_file, "w") as f:
-                f.write("Test write access")
-            os.remove(test_file)
-            logger.info(f"Имаме права за запис в {directory}")
-        except Exception as write_err:
-            logger.warning(f"Нямаме права за запис в {directory}: {str(write_err)}")
-
-    # Създаваме задължително placeholder за latest.jpg
-    height = config.height if config.height > 0 else 480
-    width = config.width if config.width > 0 else 640
-    placeholder = np.zeros((height, width, 3), dtype=np.uint8)
-
-    # Добавяме информация за средата
-    env_info = f"HF Space: {is_hf_space}" if is_hf_space else "Local environment"
-
-    cv2.putText(
-        placeholder,
-        "Camera initialization... ",
-        (50, height // 2 - 20),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1,
-        (255, 255, 255),
-        2
-    )
-
-    cv2.putText(
-        placeholder,
-        env_info,
-        (50, height // 2 + 20),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.8,
-        (200, 200, 255),
-        2
-    )
-
-    # Опитваме да запишем в различни места
-    possible_paths = [
-        "static/latest.jpg",
-        os.path.join(config.save_dir, "latest.jpg"),
-        "/tmp/latest.jpg"
-    ]
-
-    success = False
-    for path in possible_paths:
-        try:
-            cv2.imwrite(path, placeholder)
-            logger.info(f"Успешно записан placeholder в {path}")
-            success = True
-
-            # Копираме в static директорията, ако не е там
-            if path != "static/latest.jpg":
-                try:
-                    import shutil
-                    shutil.copy(path, "static/latest.jpg")
-                    logger.info(f"Копирано от {path} в static/latest.jpg")
-                except Exception as copy_err:
-                    logger.error(f"Грешка при копиране в static: {str(copy_err)}")
-            break
-        except Exception as write_err:
-            logger.warning(f"Не може да се запише в {path}: {str(write_err)}")
-
-    if not success:
-        logger.error("Не може да се запише placeholder в нито една директория!")
-
-    # Проверяваме дали файлът е създаден в static
-    logger.info(f"Placeholder file exists: {os.path.exists('static/latest.jpg')}")
-    if os.path.exists('static/latest.jpg'):
-        file_size = os.path.getsize('static/latest.jpg')
-        logger.info(f"Placeholder file size: {file_size} bytes")
-
-
-    # Отлагаме тестовото първоначално извличане на кадър с няколко секунди
-    # за да дадем време на системата да се стабилизира
-    import threading
-
-    def delayed_first_capture():
-        logger.info("Изчакване 5 секунди преди първото извличане на кадър...")
-        time.sleep(5)
-        try:
-            initial_result = capture_frame()
-            status = "успешно" if initial_result else "неуспешно"
-            logger.info(f"Резултат от първото извличане: {status}")
-        except Exception as e:
-            logger.error(f"Грешка при първо извличане: {str(e)}")
-
-    # Стартираме фоновия процес за първоначално извличане
-    first_capture_thread = threading.Thread(target=delayed_first_capture)
-    first_capture_thread.daemon = True
-    first_capture_thread.start()
-
-    # Стартираме фоновия процес за периодично заснемане
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                cv2.imwrite(path, placeholder, encode_params)
+                logger.info(f"Успешно записан placeholder в {path}")
+            except Exception as e:
+                logger.warning(f"Не може да се запише placeholder в {path}: {str(e)}")
+    
+    # Опитваме се да извлечем първия кадър
+    initial_result = capture_frame()
+    logger.info(f"Резултат от първото извличане: {'успешно' if initial_result else 'неуспешно'}")
+    
+    # Стартиране на capture thread
     start_capture_thread()
-
+    
     return True
