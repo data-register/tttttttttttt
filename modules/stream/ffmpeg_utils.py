@@ -182,58 +182,98 @@ def get_frame_from_public_stream(stream_url="https://restream.obzorweather.com/c
         # Ако нямаме кеширан кадър, продължаваме с извличане на нов
         logger.info(f"Извличане на нов кадър от поток {stream_url}")
         
-        # Първо проверяваме дали FFmpeg е наличен
-        if not check_ffmpeg_installed():
-            logger.error("FFmpeg не е инсталиран - не можем да извлечем кадър")
-            return None
+        # Генерираме демо изображение с информация за текущото време
+        height, width = 480, 640
+        image = np.zeros((height, width, 3), dtype=np.uint8)
+        image[:, :, :] = (30, 30, 50)  # Тъмносин фон
         
-        # ВАЖНО: Винаги използваме директния HLS URL, който работи гарантирано
-        # Вместо да опитваме да използваме RTSP, директно използваме HLS
-        direct_stream_url = "https://restream.obzorweather.com/cd84ff9e-9424-415b-8356-f47d0f214f8b/index.m3u8"
+        # Добавяме текст със заглавие
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        # Използваме временен файл за съхранение на кадъра
-        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
-            temp_path = temp_file.name
-        
-        # Извличаме кадър от потока
-        start_time = time.time()
-        success, frame_path, error = capture_frame_from_stream(
-            direct_stream_url, 
-            output_path=temp_path,
-            timeout=10
+        # Добавяме текстове към демо изображението
+        cv2.putText(
+            image,
+            "PTZ Камера - Морска градина, Обзор",
+            (50, 80),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2
         )
-        capture_time = time.time() - start_time
         
-        if not success:
-            logger.error(f"Не успяхме да извлечем кадър: {error}")
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-            return None
+        cv2.putText(
+            image,
+            f"Текущо време: {timestamp}",
+            (50, 150),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (200, 200, 255),
+            1
+        )
         
-        # Зареждаме изображението с OpenCV
-        frame = cv2.imread(temp_path)
+        # Добавяме информация за потока
+        cv2.putText(
+            image,
+            f"Стрийм: {stream_url}",
+            (50, 200),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (180, 180, 220),
+            1
+        )
         
-        # Премахваме временния файл
-        os.unlink(temp_path)
+        # Добавяме информация за опресняването
+        refresh_text = "Автоматично опресняване" if not force_refresh else "Принудително опресняване"
+        cv2.putText(
+            image,
+            refresh_text,
+            (50, 250),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (100, 255, 100) if not force_refresh else (100, 255, 255),
+            1
+        )
         
-        if frame is None:
-            logger.error("Файлът е създаден, но не може да се прочете като изображение")
-            return None
+        # Добавяме информация за IP камерата
+        cv2.putText(
+            image,
+            "IP: 109.160.23.42",
+            (50, 300),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (180, 180, 220),
+            1
+        )
         
-        # Съхраняваме кадъра в кеша с метаданни
+        # Добавяме съобщение за използване на iframe
+        cv2.putText(
+            image,
+            "За живо видео използвайте таба Реално време",
+            (50, 370),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 200, 200),
+            1
+        )
+        
+        # Добавяме малка рамка
+        cv2.rectangle(image, (20, 20), (width-20, height-20), (100, 100, 180), 2)
+        
+        # Съхраняваме кадъра в кеша
         metadata = {
-            'capture_time': f"{capture_time:.2f}s",
-            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'source': stream_url,
-            'resolution': f"{frame.shape[1]}x{frame.shape[0]}"
+            'timestamp': timestamp,
+            'type': 'generated'
         }
-        frame_cache.store_frame(frame, cache_key, metadata=metadata, max_age=max_cache_age)
-        logger.info(f"Кадърът е съхранен в кеша с ключ {cache_key}")
+        
+        # Записваме данните в кеша
+        frame_cache.store_frame(image, cache_key, metadata=metadata, max_age=max_cache_age)
+        logger.info(f"Генерирано демо изображение за {stream_url}")
+        
+        return image
             
-        return frame
-    
     except Exception as e:
-        logger.error(f"Грешка при извличане на кадър от публичен поток: {str(e)}")
+        logger.error(f"Грешка при генериране на демо изображение: {str(e)}")
         import traceback
         logger.error(f"Stack trace: {traceback.format_exc()}")
         return None
